@@ -118,6 +118,9 @@ def train_lstm_direct_multistep(data, checkpoint_dir, n_out, train_size):
         current_features = ['T', 'Month_sin', 'Month_cos', 'Year', 'B1_inWork', 'B2_inWork',
                           'B3_inWork', 'B4_GT41_inWork', 'B4_GT42_inWork', 'B4_inWork',
                           'B1_Available_N', 'B2_Available_N', 'B3_Available_N', 'B4_Available_N']
+        current_features = ['T', 'Month_sin', 'Month_cos', 'Year', 'B1_inWork', 'B2_inWork',
+                          'B3_inWork', 'B4_GT41_inWork', 'B4_GT42_inWork', 'B4_inWork',
+                          'B1_Available_N', 'B2_Available_N', 'B3_Available_N', 'B4_Available_N']
 
         past_features  = ['T_Prev', 'Month_sin_Prev', 'Month_cos_Prev', 'Year_Prev', 'B1_inWork_Prev',
                          'B2_inWork_Prev', 'B3_inWork_Prev', 'B4_GT41_inWork_Prev', 'B4_GT42_inWork_Prev',
@@ -140,6 +143,13 @@ def train_lstm_direct_multistep(data, checkpoint_dir, n_out, train_size):
             f'B3_Available_N_lag{step}',
             f'B4_Available_N_lag{step}'
         ]
+        future_features = [
+                f'T_lag{step}',
+                f'B1_Available_N_lag{step}',
+                f'B2_Available_N_lag{step}',
+                f'B3_Available_N_lag{step}',
+                f'B4_Available_N_lag{step}'
+            ]
         x_step_today  = data_with_lag[current_features].values
         x_step_today  = np.column_stack([x_step_today, data_with_lag['TEC_N_Aver_Prev'].values])
 
