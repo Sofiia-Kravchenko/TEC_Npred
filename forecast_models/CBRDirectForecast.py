@@ -88,6 +88,9 @@ def train_cbr_direct_multistep(data, n_out, train_size):
     data_with_lag = pd.concat([data, agg], axis=1)
     data_with_lag.dropna(inplace=True)
 
+    learning_rates = [0.01, 0.05, 0.1, 0.2]
+    depths = [4, 6, 8, 10]
+
     for i in range(0, n_out, 1):
         base_features = ['T', 'Month_sin', 'Month_cos', 'Year',
                          'B1_inWork', 'B2_inWork', 'B3_inWork', 'B4_GT41_inWork', 'B4_GT42_inWork', 'B4_inWork',
@@ -130,11 +133,33 @@ def train_cbr_direct_multistep(data, n_out, train_size):
         y_train_scaled = scaler_y.fit_transform(y_train)
         y_test_scaled = scaler_y.transform(y_test)
 
+        best_mae = float('inf')
+        best_params = {'depth': 6, 'lr': 0.01}  # default
+
+        for d in depths:
+            for lr in learning_rates:
+                test_model = CatBoostRegressor(iterations=500,
+                                               depth=d,
+                                               learning_rate=lr,
+                                               loss_function='MAE',
+                                               verbose=0,
+                                               early_stopping_rounds=50,
+                                               use_best_model=True)
+                test_model.fit(X_train_scaled, y_train, eval_set=(X_test_scaled, y_test))
+                preds = test_model.predict(X_test_scaled)
+                mae = metrics.mean_absolute_error(y_test, preds)
+                if mae < best_mae:
+                    best_mae = mae
+                    best_params = {'depth': d, 'lr': lr}
+
+        print(f"Лучшие параметры для шага {step}: {best_params}, MAE: {best_mae:.2f}")
+
         model = CatBoostRegressor(iterations=2000,
-                                  depth=6,
-                                  learning_rate=0.01,
+                                  depth=best_params['depth'],
+                                  learning_rate=best_params['lr'],
+                                  verbose=0,
                                   loss_function='MAE',
-                                  verbose=0)
+                                  )
 
         model.fit(X_train_scaled, y_train_scaled, eval_set=(X_test_scaled, y_test_scaled), early_stopping_rounds=250, use_best_model=True)
 

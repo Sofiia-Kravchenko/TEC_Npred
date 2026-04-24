@@ -29,7 +29,6 @@ def main():
     data_path = args.file
     test_start_index = args.start
     n_out = args.forecast_window
-
     model_name = os.path.basename(data_path).split('.')[0]
     checkpoint_dir = f'checkpoint/{model_name}/'
     os.makedirs(checkpoint_dir, exist_ok=True)
