@@ -38,8 +38,6 @@ data = data.drop(data[(data['B4_GT42_N_Aver'] < 50) & (data['B4_GT42_N_Aver']  >
 data = data.drop(data[(data['B4_PT40_N_Aver'] < 40) & (data['B4_PT40_N_Aver']  > 0)].index)
 data = data.drop(data[(data['TEC_N_Aver'] == 0)].index)
 
-print(data.shape)
-
 data['B1_Available_N'] = data['B1_inWork'] * 250
 data['B2_Available_N'] = data['B2_inWork'] * 250
 data['B3_Available_N'] = data['B3_inWork'] * 250
@@ -76,9 +74,7 @@ data.set_index('Date', inplace=True)
 base_features = ['T', 'Month_sin', 'Month_cos',
                 'B1_inWork', 'B2_inWork', 'B3_inWork' ,'B4_GT41_inWork', 'B4_GT42_inWork', 'B4_inWork',
                 'B1_Available_N', 'B2_Available_N', 'B3_Available_N', 'B4_Available_N',
-                'T_Prev',
-                'TEC_N_Aver_Prev',
-                ]
+                'T_Prev', 'TEC_N_Aver_Prev']
 
 df = DataFrame(data)
 df['T_rolling_3'] = df['T'].rolling(window=3).mean()
