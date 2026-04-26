@@ -63,10 +63,9 @@ def train_cbr_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, che
                         best_mae = mae
                         best_params = {'depth': d, 'lr': lr}
 
-                    best_params_storage[step] = {'depth': d, 'lr': lr}
-
-                    with open(PARAMS_FILE, 'w') as f:
-                        json.dump(best_params_storage, f, indent=4)
+            best_params_storage[step] = {'depth': d, 'lr': lr}
+            with open(PARAMS_FILE, 'w') as f:
+                json.dump(best_params_storage, f, indent=4)
 
         model = CatBoostRegressor(iterations=2000,
                                   depth=best_params['depth'],
