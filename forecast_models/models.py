@@ -1,3 +1,4 @@
+import optuna
 import tensorflow as tf
 
 from catboost import CatBoostRegressor
@@ -5,31 +6,19 @@ from sklearn.ensemble import RandomForestRegressor
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 from sklearn.linear_model import LinearRegression
-from sklearn import metrics
+
+from utils import optuna_cbr_search, optuna_rfr_search
 
 tf.random.set_seed(42)
 
 def get_catboost(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y):
-    learning_rates = [0.01, 0.05, 0.1, 0.2]
-    depths = [4, 6, 8, 10]
-    best_mae = float('inf')
-    best_params = {'depth': 6, 'lr': 0.01}  # значения по умолчанию
 
-    for d in depths:
-        for lr in learning_rates:
-            test_model = CatBoostRegressor(iterations=500,
-                                           depth=d,
-                                           learning_rate=lr,
-                                           loss_function='MAE',
-                                           verbose=0)
-            test_model.fit(X_train_s, y_train_s, eval_set=(X_test_s, y_test_s),
-                           early_stopping_rounds=50, use_best_model=True)
-            preds = test_model.predict(X_test_s)
-            yhat = scaler_y.inverse_transform(preds.reshape(-1, 1))
-            mae = metrics.mean_absolute_error(y_test, yhat)
-            if mae < best_mae:
-                best_mae = mae
-                best_params = {'depth': d, 'lr': lr}
+    study = optuna.create_study(direction="minimize", pruner=optuna.pruners.MedianPruner())
+    study.optimize(lambda trial: optuna_cbr_search(trial, X_train_s, y_train_s,
+                                               X_test_s, y_test_s, scaler_y),
+                   n_trials=20)
+
+    best_params = study.best_params
 
     model = CatBoostRegressor(iterations=2000,
                               depth=best_params['depth'],
@@ -68,10 +57,18 @@ def get_mlp(input_shape):
     model.compile(optimizer='adam', loss='mae')
     return model
 
-def get_rfr():
+def get_rfr(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y):
+    study = optuna.create_study(direction="minimize")
+    study.optimize(lambda trial: optuna_rfr_search(trial, X_train_s, y_train_s, X_test_s, y_test_s, scaler_y),
+                   n_trials=20)
+
+    best_params = study.best_params
     params = {
-        "n_estimators": 35,
-        "max_features": 3,
-        "random_state": 1
+        "n_estimators": best_params['n_estimators'],
+        "max_depth": best_params['max_depth'],
+        "min_samples_split": best_params['min_samples_split'],
+        "min_samples_leaf": best_params['min_samples_leaf'],
+        "max_features": best_params['max_features'],
+        "n_jobs": -1
     }
     return RandomForestRegressor(**params)

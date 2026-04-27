@@ -2,6 +2,7 @@ import json
 import os
 
 import numpy as np
+import optuna
 import pandas as pd
 from catboost import CatBoostRegressor
 from sklearn import metrics
@@ -9,7 +10,7 @@ from pandas import DataFrame
 from pandas import concat
 from sklearn.preprocessing import MinMaxScaler
 
-from utils import prepare_step_data, prepare_direct_data, prepare_meta_step_data, prepare_meta_direct_data
+from utils import prepare_meta_step_data, prepare_meta_direct_data, optuna_cbr_search
 
 
 def train_cbr_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, checkpoint_unit_type, results,
@@ -30,40 +31,25 @@ def train_cbr_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, che
                                                                          best_step_model,
                                                                          test_idx)
 
-    learning_rates = [0.01, 0.05, 0.1, 0.2]
-    depths = [4, 6, 8, 10]
-
     for i in range(0, n_out, 1):
         step = str(i + 1)
         print(f"\n=== Step training {step} ===")
 
         X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test = prepare_meta_direct_data(data_with_lag, step, base_features, train_size, calc_goal)
 
-        best_mae = float('inf')
-        best_params = {'depth': 6, 'lr': 0.01}  # значения по умолчанию
-
         if step in best_params_storage:
             print(f"--- Step {step}: Using saved parameters: {best_params_storage[step]}")
             best_params = best_params_storage[step]
         else:
             print(f"--- Step {step}: Grid Search...")
-            for d in depths:
-                for lr in learning_rates:
-                    test_model = CatBoostRegressor(iterations=500,
-                                                   depth=d,
-                                                   learning_rate=lr,
-                                                   loss_function='MAE',
-                                                   verbose=0)
-                    test_model.fit(X_train_scaled, y_train_scaled, eval_set=(X_test_scaled, y_test_scaled),
-                                   sample_weight=weights_train, early_stopping_rounds=250, use_best_model=True)
-                    preds = test_model.predict(X_test_scaled)
-                    yhat = scaler_y.inverse_transform(preds.reshape(-1, 1))
-                    mae = metrics.mean_absolute_error(y_test, yhat)
-                    if mae < best_mae:
-                        best_mae = mae
-                        best_params = {'depth': d, 'lr': lr}
+            study = optuna.create_study(direction="minimize", pruner=optuna.pruners.MedianPruner())
+            study.optimize(lambda trial: optuna_cbr_search(trial, X_train_scaled, y_train_scaled,
+                                                       X_test_scaled, y_test_scaled, scaler_y),
+                           n_trials=20)
 
-            best_params_storage[step] = {'depth': d, 'lr': lr}
+            best_params = study.best_params
+
+            best_params_storage[step] = best_params
             with open(PARAMS_FILE, 'w') as f:
                 json.dump(best_params_storage, f, indent=4)
 
@@ -78,6 +64,7 @@ def train_cbr_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, che
 
         yhat_scaled = model.predict(X_test_scaled)
         yhat = scaler_y.inverse_transform(yhat_scaled.reshape(-1, 1))
+        yhat = np.maximum(yhat, 0)
 
         MAE_test = metrics.mean_absolute_error(y_test, yhat)
         MSE_test = metrics.mean_squared_error(y_test, yhat)

@@ -1,7 +1,12 @@
+import optuna
 import pandas as pd
 import numpy as np
+from catboost import CatBoostRegressor
+from sklearn import metrics
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import MinMaxScaler
 from pandas import DataFrame, concat
+from optuna.integration import CatBoostPruningCallback
 
 
 def prepare_stat_data(filepath, test_start_index):
@@ -508,12 +513,12 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
     data['B2_Available_N_Prev'] = data['B2_Available_N'].shift(1)
     data['B3_Available_N_Prev'] = data['B3_Available_N'].shift(1)
     data['B4_Available_N_Prev'] = data['B4_Available_N'].shift(1)
-    data['TEC_N_Aver_pred_Prev'] = data['TEC_N_Aver_pred'].shift(1)
+    data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
 
-    base_features = ['T', 'Month_sin', 'Month_cos',
+    base_features = ['T', 'Month_sin', 'Month_cos', 'TEC_N_Aver_pred', 'B4_N_Aver_Prev',
                      'B1_inWork', 'B2_inWork', 'B3_inWork', 'B4_GT41_inWork', 'B4_GT42_inWork', 'B4_inWork',
                      'B1_Available_N', 'B2_Available_N', 'B3_Available_N', 'B4_Available_N',
-                     'T_Prev', 'TEC_N_Aver_pred_Prev']
+                     'T_Prev', 'TEC_N_Aver_Prev']
 
     df = DataFrame(data)
 
@@ -610,3 +615,46 @@ def prepare_meta_direct_data(data_with_lag, step, base_features, train_size, cal
 
     return (X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled,
             scaler_y, y_test_raw)
+
+def optuna_cbr_search(trial, X_train, y_train, X_test, y_test, scaler_y):
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    params = {
+        "iterations": 1000,
+        "depth": trial.suggest_int("depth", 4, 10),
+        "learning_rate": trial.suggest_float("lr", 1e-3, 0.1, log=True),
+        "loss_function": "MAE",
+        "verbose": 0,
+        "early_stopping_rounds": 50
+    }
+
+    pruning_callback = CatBoostPruningCallback(trial, "MAE")
+
+    model = CatBoostRegressor(**params)
+    model.fit(X_train, y_train, eval_set=(X_test, y_test), use_best_model=True, callbacks=[pruning_callback])
+
+    preds = model.predict(X_test)
+    yhat = scaler_y.inverse_transform(preds.reshape(-1, 1))
+    mae = metrics.mean_absolute_error(y_test, yhat)
+
+    return mae
+
+def optuna_rfr_search(trial, X_train, y_train, X_test, y_test, scaler_y):
+    params = {
+        "n_estimators": trial.suggest_int("n_estimators", 50, 500),
+        "max_depth": trial.suggest_int("max_depth", 3, 20),
+        "min_samples_split": trial.suggest_int("min_samples_split", 2, 10),
+        "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 5),
+        "max_features": trial.suggest_float("max_features", 0.1, 1.0),
+        "n_jobs": -1
+    }
+
+    model = RandomForestRegressor(**params)
+    model.fit(X_train, y_train.ravel())
+
+    preds = model.predict(X_test)
+    yhat = scaler_y.inverse_transform(preds.reshape(-1, 1))
+    y_true = scaler_y.inverse_transform(y_test.reshape(-1, 1))
+
+    mae = metrics.mean_absolute_error(y_true, yhat)
+
+    return mae

@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import shap
 from catboost import CatBoostRegressor
 from matplotlib import pyplot as plt
 from sklearn import metrics
@@ -10,7 +9,6 @@ from sklearn.preprocessing import MinMaxScaler
 import seaborn as sns
 
 data = pd.read_csv(r'C:\Users\guryanov\PycharmProjects\TEC_Npred\data\TEC22_Data.csv', delimiter=';', parse_dates=['Date'], dayfirst=True)
-
 data['Month'] = data['Date'].dt.month
 data['Year'] = data['Date'].dt.year
 data['Month_sin'] = np.sin(2 * np.pi * data['Month'] / 12)
@@ -28,23 +26,13 @@ data['B2_inWork'] = np.where(data['B2_N_Aver'] > 125, 1, 0)
 data['B3_inWork'] = np.where(data['B3_N_Aver'] > 125, 1, 0)
 data['B4_GT41_inWork'] = np.where(data['B4_GT41_N_Aver'] > 50, 1, 0)
 data['B4_GT42_inWork'] = np.where(data['B4_GT42_N_Aver'] > 50, 1, 0)
-data['B4_inWork'] = np.where(data['B4_N_Aver'] > 40, 1, 0)
-
-data = data.drop(data[(data['B1_N_Aver'] < 125) & (data['B1_N_Aver']  > 0)].index)
-data = data.drop(data[(data['B2_N_Aver'] < 125) & (data['B2_N_Aver']  > 0)].index)
-data = data.drop(data[(data['B3_N_Aver'] < 125) & (data['B3_N_Aver']  > 0)].index)
-data = data.drop(data[(data['B4_GT41_N_Aver'] < 50) & (data['B4_GT41_N_Aver']  > 0)].index)
-data = data.drop(data[(data['B4_GT42_N_Aver'] < 50) & (data['B4_GT42_N_Aver']  > 0)].index)
-data = data.drop(data[(data['B4_PT40_N_Aver'] < 40) & (data['B4_PT40_N_Aver']  > 0)].index)
-data = data.drop(data[(data['TEC_N_Aver'] == 0)].index)
+data['B4_inWork'] = np.where(data['B4_N_Aver'] > 50, 1, 0)
 
 data['B1_Available_N'] = data['B1_inWork'] * 250
 data['B2_Available_N'] = data['B2_inWork'] * 250
 data['B3_Available_N'] = data['B3_inWork'] * 250
-#data['B4_Available_N'] = np.where(data['T'] < -2,
-#    (data['B4_GT41_inWork'] * 160 + data['B4_GT42_inWork'] * 160 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])),
-#    (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])))
-data['B4_Available_N'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+data['B4_Available_N'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 75 *
+                          (data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
 
 data['T_Prev'] = data['T'].shift(1)
 data['Month_sin_Prev'] = data['Month_sin'].shift(1)
