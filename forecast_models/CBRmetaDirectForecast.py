@@ -35,7 +35,7 @@ def train_cbr_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, che
         step = str(i + 1)
         print(f"\n=== Step training {step} ===")
 
-        X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test = prepare_meta_direct_data(data_with_lag, step, base_features, train_size, calc_goal)
+        X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test = prepare_meta_direct_data(data, data_with_lag, step, base_features, train_size, calc_goal)
 
         if step in best_params_storage:
             print(f"--- Step {step}: Using saved parameters: {best_params_storage[step]}")
