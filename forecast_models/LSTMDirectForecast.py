@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 from keras.models import load_model
 from keras import Sequential
-from keras.src.callbacks import ModelCheckpoint, EarlyStopping
-from keras.src.layers import Dense, LSTM
+from keras.callbacks import ModelCheckpoint, EarlyStopping
+from keras.layers import Dense, LSTM
 from pandas import DataFrame, concat
 from sklearn.preprocessing import MinMaxScaler
 from sklearn import metrics
@@ -34,7 +34,7 @@ def train_lstm_direct_multistep(data, checkpoint_dir, n_out, train_size, checkpo
         step = i + 1
         print(f"\n=== Step training {step} ===")
 
-        X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test = prepare_direct_data(data_with_lag, step, base_features, train_size)
+        X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test = prepare_direct_data(data, data_with_lag, step, base_features, train_size)
 
         X_train_scaled = X_train_scaled.reshape((X_train_scaled.shape[0], 1, X_train_scaled.shape[1]))
         X_test_scaled = X_test_scaled.reshape((X_test_scaled.shape[0], 1, X_test_scaled.shape[1]))

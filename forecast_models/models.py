@@ -9,6 +9,7 @@ from sklearn.linear_model import LinearRegression
 
 from utils import optuna_cbr_search, optuna_rfr_search
 
+
 tf.random.set_seed(42)
 
 def get_catboost(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y):
