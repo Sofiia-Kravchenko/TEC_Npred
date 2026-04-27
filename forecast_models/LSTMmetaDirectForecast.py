@@ -1,7 +1,9 @@
 import os
+import tensorflow as tf
 
 import numpy as np
 import pandas as pd
+import tensorflow.keras.backend as K
 from keras.models import load_model
 from keras import Sequential
 from keras.src.callbacks import ModelCheckpoint, EarlyStopping
@@ -11,7 +13,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn import metrics
 
 from utils import prepare_meta_step_data, prepare_meta_direct_data
-
+tf.random.set_seed(42)
 
 def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, checkpoint_unit_type, results, best_window_model_name, test_idx, best_step_model, best_stat_model_name, calc_goal):
     results_list = []
@@ -22,12 +24,16 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, ch
     data_with_lag, base_features, weights_train = prepare_meta_step_data(data, train_size, n_out, results, best_window_model_name, best_stat_model_name, best_step_model,
      test_idx)
 
+    def physical_constraints_loss(y_true, y_pred):
+        base_error = K.abs(y_true - y_pred)
+        penalty_gate = K.maximum(0.0, threshold_scaled - y_pred)
+        return K.mean(base_error + (penalty_gate * 20.0))
     def build_model(input_shape):
         model = Sequential()
         model.add(LSTM(100, input_shape=input_shape))
         model.add(Dense(50, activation='relu'))
         model.add(Dense(1))
-        model.compile(loss='mae', optimizer='adam', metrics=['mse', 'mape', 'r2_score'])
+        model.compile(loss=physical_constraints_loss, optimizer='adam', metrics=['mse', 'mape', 'r2_score'])
         return model
     for i in range(0, n_out, 1):
         step = i + 1
@@ -38,6 +44,7 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, ch
         X_train_scaled = X_train_scaled.reshape((X_train_scaled.shape[0], 1, X_train_scaled.shape[1]))
         X_test_scaled = X_test_scaled.reshape((X_test_scaled.shape[0], 1, X_test_scaled.shape[1]))
 
+        threshold_scaled = scaler_y.transform(np.array([[90.0]]))[0, 0]
         model = build_model((X_train_scaled.shape[1], X_train_scaled.shape[2]))
 
         current_checkpoint = checkpoint_base + str(i) + '.keras'
@@ -72,6 +79,8 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, ch
 
         yhat_scaled = model.predict(X_test_scaled)
         yhat = scaler_y.inverse_transform(yhat_scaled)
+        yhat = np.maximum(yhat, 0)
+
         MAE_test = metrics.mean_absolute_error(y_test, yhat)
         MSE_test = metrics.mean_squared_error(y_test, yhat)
         WAPE_test = np.sum(np.abs(y_test - yhat)) / np.sum(np.abs(y_test)) * 100

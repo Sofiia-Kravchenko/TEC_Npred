@@ -30,6 +30,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
         X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, datas, test_idx = prepare_meta_data(results, data_path, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model)
         Xw_train_s, Xw_test_s, yw_train_s, yw_test_s, scaler_yw, datasw, testw_idx = prepare_meta_window_data(results, data_path, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model)
     results = {}
+
     # ---  LSTM ---
     print('LSTM_Stat_Model')
     X_train_lstm = X_train_s.reshape((X_train_s.shape[0], 1, X_train_s.shape[1]))
@@ -163,7 +164,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
 
     # ---  Random Forest Regression---
     print('RFR_Stat_Model')
-    model_rfr = get_rfr()
+    model_rfr = get_rfr(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y)
     model_rfr.fit(X_train_s, y_train_s)
     y_test_pred = model_rfr.predict(X_test_s).reshape(-1, 1)
     y_pred_unscaled = scaler_y.inverse_transform(y_test_pred)
@@ -288,6 +289,8 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
         lstm_multi_results, lstm_multi_metrics = train_lstm_meta_direct_multistep(data_path, checkpoint_dir, n_out, test_start_index, checkpoint_unit_type, results,
                                      best_window_model_name, test_idx, best_step_model, best_stat_model_name, calc_goal)
     lstm_multi_results = np.array(lstm_multi_results).reshape(-1, 14)
+    df_report = pd.DataFrame(lstm_multi_results)
+    df_report.to_csv('lstm_multi_results.csv', index=False)
     lstm_multi_metrics = np.array(lstm_multi_metrics).reshape(-1, 4)
     # --- Boosting with window direct forecast---
     print('CBR_direct_Stat_Model')
@@ -300,7 +303,6 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
     cbr_multi_results = np.array(cbr_multi_results).reshape(-1, 14)
     cbr_multi_metrics = np.array(cbr_multi_metrics).reshape(-1, 4)
 
-    print(results)
     best_window_model_name, best_stat_model_name  = print_stat_results(results, y_test, calc_goal)
     best_step_model_name = print_step_results(lstm_multi_metrics, cbr_multi_metrics)
     if best_step_model_name == 'lstm': best_step_model = lstm_multi_results

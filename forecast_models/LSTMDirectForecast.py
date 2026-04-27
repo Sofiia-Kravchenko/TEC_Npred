@@ -1,4 +1,5 @@
 import os
+import tensorflow as tf
 
 import numpy as np
 import pandas as pd
@@ -11,7 +12,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn import metrics
 
 from utils import prepare_step_data, prepare_direct_data
-
+tf.random.set_seed(42)
 
 def train_lstm_direct_multistep(data, checkpoint_dir, n_out, train_size, checkpoint_unit_type):
     results_list = []
@@ -72,6 +73,8 @@ def train_lstm_direct_multistep(data, checkpoint_dir, n_out, train_size, checkpo
 
         yhat_scaled = model.predict(X_test_scaled)
         yhat = scaler_y.inverse_transform(yhat_scaled)
+        yhat = np.maximum(yhat, 0)
+
         MAE_test = metrics.mean_absolute_error(y_test, yhat)
         MSE_test = metrics.mean_squared_error(y_test, yhat)
         WAPE_test = np.sum(np.abs(y_test - yhat)) / np.sum(np.abs(y_test)) * 100
