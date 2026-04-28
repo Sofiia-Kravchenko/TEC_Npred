@@ -21,8 +21,6 @@ from tensorflow.keras.models import load_model
 tf.random.set_seed(42)
 
 def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoint_unit_type, n_out, calc_goal, results, test_idx, best_window_model_name, best_stat_model_name, best_step_model):
-    print("best_window_model_name:", best_window_model_name)
-    print("best_stat_model_name:", best_stat_model_name)
     if calc_goal == 'TEC_N_Aver':
         X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, datas, test_idx = prepare_stat_data(data_path, test_start_index=test_start_index)
         Xw_train_s, Xw_test_s, yw_train_s, yw_test_s, scaler_yw, datasw, testw_idx = prepare_window_data(data_path, test_start_index=test_start_index)
@@ -36,11 +34,11 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
     X_train_lstm = X_train_s.reshape((X_train_s.shape[0], 1, X_train_s.shape[1]))
     X_test_lstm = X_test_s.reshape((X_test_s.shape[0], 1, X_test_s.shape[1]))
 
-    checkpoint_filepath = checkpoint_dir+checkpoint_unit_type+'_LSTM.keras'
+    checkpoint_filepath = checkpoint_dir + checkpoint_unit_type +'_LSTM.keras'
     model_checkpoint_callback = ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=False,
                                                 monitor='val_loss', mode='min', save_best_only=True, verbose=0)
 
-    model_lstm = get_lstm((1, X_train_s.shape[1]))
+    model_lstm = get_lstm((1, X_train_s.shape[1]), X_train_lstm, X_test_lstm, y_train_s, y_test_s, y_train, y_test, scaler_y)
 
     if os.path.exists(checkpoint_filepath):
         print("Loading model for further training...")
@@ -187,7 +185,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
     model_checkpoint_callback = ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=False,
                                                 monitor='val_loss', mode='min', save_best_only=True, verbose=0)
 
-    model_lstmrw = get_lstm((1, Xw_train_s.shape[1]))
+    model_lstmrw = get_lstm((1, Xw_train_s.shape[1]), Xw_train_lstm, Xw_test_lstm, yw_train_s, yw_test_s, y_train, y_test, scaler_yw)
 
     if os.path.exists(checkpoint_filepath):
         print("Loading model for further training...")
