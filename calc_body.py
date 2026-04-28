@@ -215,7 +215,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
     results['LSTM_with_window'] = np.maximum(y_pred_unscaled, 0)
 
     # ---  simple MLP with window---
-    print('sMLP_Stat_Model')
+    print('sMLP_with_window_Stat_Model')
     model_smlpw = get_simple_mlp((Xw_train_s.shape[1],))
 
     checkpoint_filepath = checkpoint_dir+checkpoint_unit_type+'_sMLP_with_RW.keras'
