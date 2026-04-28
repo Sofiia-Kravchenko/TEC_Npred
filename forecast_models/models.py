@@ -1,16 +1,20 @@
+import json
+
 import optuna
 import tensorflow as tf
 
 from catboost import CatBoostRegressor
+from keras.optimizers import Adam
 from sklearn.ensemble import RandomForestRegressor
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 from sklearn.linear_model import LinearRegression
 
-from utils import optuna_cbr_search, optuna_rfr_search
-
+from utils import optuna_cbr_search, optuna_rfr_search, optuna_lstm_search
 
 tf.random.set_seed(42)
+LSTM_STAT_PARAMS_FILE = 'lstm_stat_best_params.json'
+
 
 def get_catboost(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y):
 
@@ -28,13 +32,21 @@ def get_catboost(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scal
                               verbose=0)
     return model
 
-def get_lstm(input_shape):
+def get_lstm(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y):
+    study = optuna.create_study(direction='minimize')
+    study.optimize(lambda trial: optuna_lstm_search(trial, X_train_s, y_train_s,
+                                               X_test_s, y_test_s, scaler_y, input_shape), n_trials=20)
+    with open(LSTM_STAT_PARAMS_FILE, 'w') as f:
+        json.dump(study.best_params, f, indent=4)
+
+    best_params = study.best_params
     model = Sequential([
-        LSTM(50, input_shape=input_shape),
-        Dense(25),
+        LSTM(best_params['n_units_lstm'], input_shape=input_shape),
+        Dense(best_params['n_units_dense']),
         Dense(1)
     ])
-    model.compile(optimizer='adam', loss='mae')
+    optimizer = Adam(learning_rate=best_params['lr'])
+    model.compile(optimizer=optimizer, loss='mae')
     return model
 
 def get_linear():

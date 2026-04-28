@@ -2,6 +2,9 @@ import optuna
 import pandas as pd
 import numpy as np
 from catboost import CatBoostRegressor
+from keras import Sequential
+from keras.layers import LSTM, Dense
+from keras.optimizers import Adam
 from sklearn import metrics
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import MinMaxScaler
@@ -727,7 +730,7 @@ def prepare_step_data(filepath, test_start_index, n_out):
 
         base_features = ['T', 'Month_sin', 'Month_cos',
                          'B1_inWork', 'B2_inWork',
-                         'B1_GT11_inWork', 'B1_GT12_inWork', 'B2_GT21_inWork', 'B2_GT22_inWork'
+                         'B1_GT11_inWork', 'B1_GT12_inWork', 'B2_GT21_inWork', 'B2_GT22_inWork',
                          'B1_Available_N', 'B2_Available_N',
                          'T_Prev', 'TEC_N_Aver_Prev' ]
 
@@ -900,6 +903,20 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
         data.loc[data['B1_N_Aver'] < 50, 'B1_N_Aver'] = 0
         data.loc[data['B2_N_Aver'] < 50, 'B2_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] < 50, 'TEC_N_Aver'] = 0
+        data['B1_Available_N'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
+                data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
+        data['B2_Available_N'] = (data['B2_GT21_inWork'] * 70 + data['B2_GT22_inWork'] * 70 + 26 * (
+                data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+
+        data['T_Prev'] = data['T'].shift(1)
+        data['Month_sin_Prev'] = data['Month_sin'].shift(1)
+        data['Month_cos_Prev'] = data['Month_cos'].shift(1)
+        data['Year_Prev'] = data['Year'].shift(1)
+        data['B1_N_Aver_Prev'] = data['B1_N_Aver'].shift(1)
+        data['B2_N_Aver_Prev'] = data['B2_N_Aver'].shift(1)
+        data['B1_Available_N_Prev'] = data['B1_Available_N'].shift(1)
+        data['B2_Available_N_Prev'] = data['B2_Available_N'].shift(1)
+        data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
 
         data['sample_weight'] = 1.0
 
@@ -928,7 +945,7 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
 
         base_features = ['T', 'Month_sin', 'Month_cos', 'TEC_N_Aver_pred',
                          'B1_inWork', 'B2_inWork',
-                         'B1_GT11_inWork', 'B1_GT12_inWork', 'B2_GT21_inWork', 'B2_GT22_inWork'
+                         'B1_GT11_inWork', 'B1_GT12_inWork', 'B2_GT21_inWork', 'B2_GT22_inWork',
                          'B1_Available_N', 'B2_Available_N',
                          'T_Prev', 'TEC_N_Aver_Prev']
 
@@ -974,12 +991,17 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
             cols.append(df[['TEC_N_Aver_pred']].shift(-i))
             cols.append(df[['B1_inWork']].shift(-i))
             cols.append(df[['B2_inWork']].shift(-i))
+            cols.append(df[['B1_GT11_inWork']].shift(-i))
+            cols.append(df[['B1_GT12_inWork']].shift(-i))
+            cols.append(df[['B2_GT21_inWork']].shift(-i))
+            cols.append(df[['B2_GT22_inWork']].shift(-i))
             cols.append(df[['B1_Available_N']].shift(-i))
             cols.append(df[['B2_Available_N']].shift(-i))
             cols.append(df[['B1_N_Aver']].shift(-i))
             cols.append(df[['B2_N_Aver']].shift(-i))
             names += [f'T_lag{i}', f'Month_sin_lag{i}', f'Month_cos_lag{i}', f'Year_lag{i}',
                       f'TEC_N_Aver_pred_lag{i}', f'B1_inWork_lag{i}', f'B2_inWork_lag{i}',
+                      f'B1_GT11_inWork_lag{i}', f'B1_GT12_inWork_lag{i}', f'B2_GT21_inWork_lag{i}', f'B2_GT22_inWork_lag{i}',
                       f'B1_Available_N_lag{i}', f'B2_Available_N_lag{i}',
                       f'B1_N_Aver_lag{i}', f'B2_N_Aver_lag{i}']
 
@@ -1037,6 +1059,7 @@ def prepare_meta_direct_data(filepath, data_with_lag, step, base_features, train
         step_features = base_features + [
             f'T_lag{step}',
             f'B1_inWork_lag{step}', f'B2_inWork_lag{step}',
+            f'B1_GT11_inWork_lag{step}', f'B1_GT12_inWork_lag{step}', f'B2_GT21_inWork_lag{step}', f'B2_GT22_inWork_lag{step}',
             f'B1_Available_N_lag{step}', f'B2_Available_N_lag{step}',
             f'TEC_N_Aver_pred_lag{step}'
         ]
@@ -1099,3 +1122,20 @@ def optuna_rfr_search(trial, X_train, y_train, X_test, y_test, scaler_y):
     mae = metrics.mean_absolute_error(y_true, yhat)
 
     return mae
+
+def optuna_lstm_search(trial, X_train, y_train, X_test, y_test, scaler_y, input_shape):
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    n_units_lstm = trial.suggest_int('n_units_lstm', 20, 150) if trial else 50
+    n_units_dense = trial.suggest_int('n_units_dense', 10, 50) if trial else 25
+    lr = trial.suggest_float('lr', 1e-4, 1e-2, log=True) if trial else 0.001
+
+    model = Sequential([
+        LSTM(n_units_lstm, input_shape=input_shape),
+        Dense(n_units_dense),
+        Dense(1)
+    ])
+    optimizer = Adam(learning_rate=lr)
+    model.compile(optimizer=optimizer, loss='mae')
+    model.fit(X_train, y_train, epochs=10, batch_size=32, verbose=0)
+    loss = model.evaluate(X_train, y_train, verbose=0)
+    return loss
