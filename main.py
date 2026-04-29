@@ -23,7 +23,9 @@ def main():
     checkpoint_dir = f'checkpoint/{model_name}/'
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs(checkpoint_dir+'multistep', exist_ok=True)
-    results={}
+    tec_results={}
+    tg_results = {}
+    results = {}
     test_idx = []
     best_window_model_name = ''
     best_stat_model_name = ''
@@ -34,16 +36,15 @@ def main():
 
     warnings.filterwarnings("ignore")
 
-    results, test_idx, best_window_model_name, best_stat_model_name, best_step_model = calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoint_unit_type, n_out, calc_goal, results, test_idx, best_window_model_name, best_stat_model_name, best_step_model)
-
-
+    tec_results, test_idx, best_window_model_name, best_stat_model_name, best_step_model = calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoint_unit_type, n_out, calc_goal, tec_results, test_idx, best_window_model_name, best_stat_model_name, best_step_model)
+    results.update(tec_results)
     for calc_goal in args.target_power_unit:
         print(f"--- Prediction for: {calc_goal} ---")
-        print("best_window_model_name:", best_window_model_name)
-        print("best_stat_model_name:", best_stat_model_name)
         checkpoint_unit_type = calc_goal
 
-        results, test_idx, best_window_model_name, best_stat_model_name, best_step_model = calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoint_unit_type, n_out, calc_goal, results, test_idx, best_window_model_name, best_stat_model_name, best_step_model)
+        tg_results, test_idx, best_window_model_name, best_stat_model_name, best_step_model = calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoint_unit_type, n_out, calc_goal, tec_results, test_idx, best_window_model_name, best_stat_model_name, best_step_model)
+    results.update(tg_results)
+
 
 if __name__ == "__main__":
     main()

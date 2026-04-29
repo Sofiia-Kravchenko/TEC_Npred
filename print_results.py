@@ -66,8 +66,6 @@ def print_stat_results(results, y_test, calc_goal):
 
         best_stat_model_name = best_model['Model Name']
 
-    print("best_window_model_name:", best_window_model_name)
-    print("best_stat_model_name:", best_stat_model_name)
     return best_window_model_name, best_stat_model_name
 
 def print_step_results(lstm_multi_results, cbr_multi_results):

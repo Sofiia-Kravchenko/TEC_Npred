@@ -10,10 +10,9 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 from sklearn.linear_model import LinearRegression
 
-from utils import optuna_cbr_search, optuna_rfr_search, optuna_lstm_search
+from utils import optuna_cbr_search, optuna_rfr_search, optuna_lstm_search, scale_combined, custom_loss
 
 tf.random.set_seed(42)
-LSTM_STAT_PARAMS_FILE = 'lstm_stat_best_params.json'
 
 
 def get_catboost(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y):
@@ -32,13 +31,10 @@ def get_catboost(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scal
                               verbose=0)
     return model
 
-def get_lstm(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y):
+def get_lstm(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, y_train_s_combined, y_test_s_combined):
     study = optuna.create_study(direction='minimize')
     study.optimize(lambda trial: optuna_lstm_search(trial, X_train_s, y_train_s,
-                                               X_test_s, y_test_s, scaler_y, input_shape), n_trials=20)
-    with open(LSTM_STAT_PARAMS_FILE, 'w') as f:
-        json.dump(study.best_params, f, indent=4)
-
+                                               X_test_s, y_test_s, scaler_y, input_shape, y_train_s_combined, y_test_s_combined), n_trials=20)
     best_params = study.best_params
     model = Sequential([
         LSTM(best_params['n_units_lstm'], input_shape=input_shape),
@@ -46,7 +42,7 @@ def get_lstm(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_t
         Dense(1)
     ])
     optimizer = Adam(learning_rate=best_params['lr'])
-    model.compile(optimizer=optimizer, loss='mae')
+    model.compile(optimizer=optimizer, loss=custom_loss)
     return model
 
 def get_linear():
@@ -57,7 +53,7 @@ def get_simple_mlp(input_shape):
             Dense(128, activation='relu',input_shape=input_shape),
             Dense(1)
         ])
-    model.compile(optimizer='adam', loss='mae')
+    model.compile(optimizer='adam', loss=custom_loss)
     return model
 
 def get_mlp(input_shape):
@@ -67,7 +63,7 @@ def get_mlp(input_shape):
         Dense(16, activation='relu'),
         Dense(1)
         ])
-    model.compile(optimizer='adam', loss='mae')
+    model.compile(optimizer='adam', loss=custom_loss)
     return model
 
 def get_rfr(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y):

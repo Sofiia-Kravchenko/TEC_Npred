@@ -22,11 +22,11 @@ tf.random.set_seed(42)
 
 def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoint_unit_type, n_out, calc_goal, results, test_idx, best_window_model_name, best_stat_model_name, best_step_model):
     if calc_goal == 'TEC_N_Aver':
-        X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, datas, test_idx = prepare_stat_data(data_path, test_start_index=test_start_index)
-        Xw_train_s, Xw_test_s, yw_train_s, yw_test_s, scaler_yw, datasw, testw_idx = prepare_window_data(data_path, test_start_index=test_start_index)
+        X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, datas, test_idx,  y_train_s_combined, y_test_s_combined = prepare_stat_data(data_path, test_start_index=test_start_index)
+        Xw_train_s, Xw_test_s, yw_train_s, yw_test_s, scaler_yw, datasw, testw_idx,  yw_train_s_combined, yw_test_s_combined = prepare_window_data(data_path, test_start_index=test_start_index)
     else:
-        X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, datas, test_idx = prepare_meta_data(results, data_path, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model)
-        Xw_train_s, Xw_test_s, yw_train_s, yw_test_s, scaler_yw, datasw, testw_idx = prepare_meta_window_data(results, data_path, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model)
+        X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, datas, test_idx,  y_train_s_combined, y_test_s_combined = prepare_meta_data(results, data_path, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model)
+        Xw_train_s, Xw_test_s, yw_train_s, yw_test_s, scaler_yw, datasw, testw_idx,  yw_train_s_combined, yw_test_s_combined = prepare_meta_window_data(results, data_path, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model)
     results = {}
 
     # ---  LSTM ---
@@ -38,7 +38,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
     model_checkpoint_callback = ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=False,
                                                 monitor='val_loss', mode='min', save_best_only=True, verbose=0)
 
-    model_lstm = get_lstm((1, X_train_s.shape[1]), X_train_lstm, X_test_lstm, y_train_s, y_test_s, y_train, y_test, scaler_y)
+    model_lstm = get_lstm((1, X_train_s.shape[1]), X_train_lstm, X_test_lstm, y_train_s, y_test_s, y_train, y_test, scaler_y, y_train_s_combined, y_test_s_combined)
 
     if os.path.exists(checkpoint_filepath):
         print("Loading model for further training...")
@@ -54,10 +54,10 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
                                             min_delta=0.0001)
 
     model_lstm.fit(
-        X_train_lstm, y_train_s,
+        X_train_lstm, y_train_s_combined,
         epochs=current_epochs,
         batch_size=30,
-        validation_data=(X_test_lstm, y_test_s),
+        validation_data=(X_test_lstm, y_test_s_combined),
         callbacks=[early_stop_callback, model_checkpoint_callback],
         verbose=0,
         shuffle=False
@@ -114,10 +114,10 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
                                             min_delta=0.0001)
 
     model_smlp.fit(X_train_s ,
-                y_train_s,
+                y_train_s_combined,
                 epochs=current_epochs,
                 batch_size=30,
-                validation_data=(X_test_s, y_test_s),
+                validation_data=(X_test_s, y_test_s_combined),
                 validation_batch_size=30,
                 callbacks=[early_stop_callback,model_checkpoint_callback],
                 verbose=0,
@@ -147,10 +147,10 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
                                             min_delta=0.0001)
 
     model_mlp.fit(X_train_s ,
-                y_train_s,
+                y_train_s_combined,
                 epochs=current_epochs,
                 batch_size=30,
-                validation_data=(X_test_s, y_test_s),
+                validation_data=(X_test_s, y_test_s_combined),
                 validation_batch_size=30,
                 callbacks=[early_stop_callback,model_checkpoint_callback],
                 verbose=0,
@@ -178,14 +178,19 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
 
     # ---  LSTM with window ---
     print('LSTM_with_window_Stat_Model')
+
     Xw_train_lstm = Xw_train_s.reshape((Xw_train_s.shape[0], 1, Xw_train_s.shape[1]))
     Xw_test_lstm = Xw_test_s.reshape((Xw_test_s.shape[0], 1, Xw_test_s.shape[1]))
+    print('Xw_train_lstm: ', Xw_train_lstm.shape)
+    print('yw_train_s_combined: ', yw_train_s_combined.shape)
+    print('Xw_test_lstm: ', Xw_test_lstm.shape)
+    print('yw_test_s_combined: ', yw_test_s_combined.shape)
 
     checkpoint_filepath = checkpoint_dir+checkpoint_unit_type+'_LSTM_with_RW.keras'
     model_checkpoint_callback = ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=False,
                                                 monitor='val_loss', mode='min', save_best_only=True, verbose=0)
 
-    model_lstmrw = get_lstm((1, Xw_train_s.shape[1]), Xw_train_lstm, Xw_test_lstm, yw_train_s, yw_test_s, y_train, y_test, scaler_yw)
+    model_lstmrw = get_lstm((1, Xw_train_s.shape[1]), Xw_train_lstm, Xw_test_lstm, yw_train_s, yw_test_s, y_train, y_test, scaler_yw, yw_train_s_combined, yw_test_s_combined)
 
     if os.path.exists(checkpoint_filepath):
         print("Loading model for further training...")
@@ -199,10 +204,11 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
         current_epochs = 1000
         early_stop_callback = EarlyStopping(monitor='val_loss', patience=100, verbose=1, restore_best_weights=True,
                                             min_delta=0.0001)
-    model_lstmrw.fit(Xw_train_lstm, yw_train_s,
+
+    model_lstmrw.fit(Xw_train_lstm, yw_train_s_combined,
                 epochs=current_epochs,
                 batch_size=30,
-                validation_data=(Xw_test_lstm, yw_test_s),
+                validation_data=(Xw_test_lstm, yw_test_s_combined),
                 validation_batch_size=30,
                 callbacks=[early_stop_callback,model_checkpoint_callback],
                 verbose=0,
@@ -233,10 +239,10 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
                                             min_delta=0.0001)
 
     model_smlpw.fit(Xw_train_s,
-                yw_train_s,
+                yw_train_s_combined,
                 epochs=current_epochs,
                 batch_size=30,
-                validation_data=(Xw_test_s, yw_test_s),
+                validation_data=(Xw_test_s, yw_test_s_combined),
                 validation_batch_size=30,
                 callbacks=[early_stop_callback,model_checkpoint_callback],
                 verbose=0,
@@ -266,10 +272,10 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
                                             min_delta=0.0001)
 
     model_mlpw.fit(Xw_train_s,
-                  yw_train_s,
+                  yw_train_s_combined,
                   epochs=current_epochs,
                   batch_size=30,
-                  validation_data=(Xw_test_s, yw_test_s),
+                  validation_data=(Xw_test_s, yw_test_s_combined),
                   validation_batch_size=30,
                   callbacks=[early_stop_callback, model_checkpoint_callback],
                   verbose=0,
