@@ -10,6 +10,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import MinMaxScaler
 from pandas import DataFrame, concat
 from optuna.integration import CatBoostPruningCallback
+import tensorflow as tf
 
 def prepare_stat_data(filepath, test_start_index):
     data = pd.read_csv(filepath, delimiter=';', parse_dates=['Date'], dayfirst=True)
@@ -95,14 +96,17 @@ def prepare_stat_data(filepath, test_start_index):
         data.loc[data['B2_N_Aver'] < 50, 'B2_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] < 50, 'TEC_N_Aver'] = 0
 
-        #data = data.drop(data[(data['B1_N_Aver'] < 50) & (data['B1_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B2_N_Aver'] < 50) & (data['B2_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['TEC_N_Aver'] == 0)].index)
-
-        data['B1_Available_N'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
+        data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                     data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
-        data['B2_Available_N'] = (data['B2_GT21_inWork'] * 70 + data['B2_GT22_inWork'] * 70 + 26 * (
+        data['B2_Available_Nmax'] = (data['B2_GT21_inWork'] * 70 + data['B2_GT22_inWork'] * 70 + 26 * (
                     data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax']
+
+        data['B1_Available_Nmin'] = (data['B1_GT11_inWork'] * 30 + data['B1_GT12_inWork'] * 30 + 15 * (
+                    data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
+        data['B2_Available_Nmin'] = (data['B2_GT21_inWork'] * 30 + data['B2_GT22_inWork'] * 30 + 15 * (
+                    data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin']
 
         data.dropna(inplace=True)
         print(data.shape)
@@ -112,25 +116,35 @@ def prepare_stat_data(filepath, test_start_index):
         X = data.loc[:, ['T', 'Month_sin', 'Month_cos', 'Year',
                          'B1_GT11_inWork', 'B1_GT12_inWork', 'B2_GT21_inWork', 'B2_GT22_inWork',
                          'B1_inWork', 'B2_inWork',
-                         'B1_Available_N', 'B2_Available_N']].values
+                         'B1_Available_Nmax', 'B2_Available_Nmax',
+                         'B1_Available_Nmin', 'B2_Available_Nmin',
+                         'TEC_Available_Nmax','TEC_Available_Nmin']].values
         y = data.loc[:, ['TEC_N_Aver']].values
+        y_true_combined = data.loc[:, ['TEC_N_Aver', 'TEC_Available_Nmax',
+                                       'TEC_Available_Nmin']].values
 
 
     n = test_start_index
     X_train, X_test = X[:n], X[n:]
     y_train, y_test = y[:n], y[n:]
+    y_train_comb_raw, y_test_comb_raw = y_true_combined[:n], y_true_combined[n:]
 
     scaler_x = MinMaxScaler()
     scaler_y = MinMaxScaler()
 
     X_train_s = scaler_x.fit_transform(X_train)
     X_test_s = scaler_x.transform(X_test)
-    y_train_s = scaler_y.fit_transform(y_train)
+
+    scaler_y.fit(y_train)
+    y_train_s =scaler_y.transform(y_train)
     y_test_s = scaler_y.transform(y_test)
+
+    y_train_s_combined = scale_combined(y_train_comb_raw, scaler_y)
+    y_test_s_combined = scale_combined(y_test_comb_raw, scaler_y)
 
     test_idx = data.index[test_start_index:]
 
-    return X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, data.index, test_idx
+    return X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined
 
 def prepare_window_data(filepath, test_start_index):
     data = pd.read_csv(filepath, delimiter=';', parse_dates=['Date'], dayfirst=True)
@@ -238,14 +252,17 @@ def prepare_window_data(filepath, test_start_index):
         data.loc[data['B2_N_Aver'] < 50, 'B2_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] < 50, 'TEC_N_Aver'] = 0
 
-        #data = data.drop(data[(data['B1_N_Aver'] < 50) & (data['B1_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B2_N_Aver'] < 50) & (data['B2_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['TEC_N_Aver'] == 0)].index)
+        data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
+                data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
+        data['B2_Available_Nmax'] = (data['B2_GT21_inWork'] * 70 + data['B2_GT22_inWork'] * 70 + 26 * (
+                data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax']
 
-        data['B1_Available_N'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
-                    data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
-        data['B2_Available_N'] = (data['B2_GT21_inWork'] * 70 + data['B2_GT22_inWork'] * 70 + 26 * (
-                    data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['B1_Available_Nmin'] = (data['B1_GT11_inWork'] * 30 + data['B1_GT12_inWork'] * 30 + 15 * (
+                data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
+        data['B2_Available_Nmin'] = (data['B2_GT21_inWork'] * 30 + data['B2_GT22_inWork'] * 30 + 15 * (
+                data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin']
 
         data['T_Prev'] = data['T'].shift(1)
         data['Month_sin_Prev'] = data['Month_sin'].shift(1)
@@ -253,39 +270,58 @@ def prepare_window_data(filepath, test_start_index):
         data['Year_Prev'] = data['Year'].shift(1)
         data['B1_N_Aver_Prev'] = data['B1_N_Aver'].shift(1)
         data['B2_N_Aver_Prev'] = data['B2_N_Aver'].shift(1)
-        data['B1_Available_N_Prev'] = data['B1_Available_N'].shift(1)
-        data['B2_Available_N_Prev'] = data['B2_Available_N'].shift(1)
+        data['TEC_Available_Nmax_Prev'] = data['TEC_Available_Nmax'].shift(1)
+        data['B1_Available_Nmax_Prev'] = data['B1_Available_Nmax'].shift(1)
+        data['B2_Available_Nmax_Prev'] = data['B2_Available_Nmax'].shift(1)
+        data['TEC_Available_Nmin_Prev'] = data['TEC_Available_Nmin'].shift(1)
+        data['B1_Available_Nmin_Prev'] = data['B1_Available_Nmin'].shift(1)
+        data['B2_Available_Nmin_Prev'] = data['B2_Available_Nmin'].shift(1)
         data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
 
         data.dropna(inplace=True)
 
         data.set_index('Date', inplace=True)
 
-        Xw = data.loc[:, ['T', 'Month_sin', 'Month_cos', 'Year',
+        X = data.loc[:, ['T', 'Month_sin', 'Month_cos', 'Year',
                         'B1_GT11_inWork', 'B1_GT12_inWork', 'B2_GT21_inWork', 'B2_GT22_inWork',
                          'B1_inWork', 'B2_inWork',
-                         'B1_Available_N', 'B2_Available_N',
+                         'B1_Available_Nmax', 'B2_Available_Nmax',
+                         'B1_Available_Nmin', 'B2_Available_Nmin',
+                         'TEC_Available_Nmax', 'TEC_Available_Nmin',
                          'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev', 'Year_Prev',
-                         'B1_N_Aver_Prev', 'B2_N_Aver_Prev', 'B1_Available_N_Prev', 'B2_Available_N_Prev',
+                         'B1_N_Aver_Prev', 'B2_N_Aver_Prev',
+                         'B1_Available_Nmax_Prev', 'B2_Available_Nmax_Prev',
+                         'B1_Available_Nmin_Prev', 'B2_Available_Nmin_Prev',
+                        'TEC_Available_Nmax_Prev', 'TEC_Available_Nmin_Prev',
                          'TEC_N_Aver_Prev']].values
-        yw = data.loc[:, ['TEC_N_Aver']].values
+        y = data.loc[:, ['TEC_N_Aver']].values
+
+        y_true_combined = data.loc[:, ['TEC_N_Aver', 'TEC_Available_Nmax',
+                                       'TEC_Available_Nmin']].values
 
     n = test_start_index
 
-    Xw_train, Xw_test = Xw[:n], Xw[n:]
-    yw_train, yw_test = yw[:n], yw[n:]
+    n = test_start_index
+    X_train, X_test = X[:n], X[n:]
+    y_train, y_test = y[:n], y[n:]
+    y_train_comb_raw, y_test_comb_raw = y_true_combined[:n], y_true_combined[n:]
 
-    scaler_xw = MinMaxScaler()
-    scaler_yw = MinMaxScaler()
+    scaler_x = MinMaxScaler()
+    scaler_y = MinMaxScaler()
 
-    Xw_train_s = scaler_xw.fit_transform(Xw_train)
-    Xw_test_s = scaler_xw.transform(Xw_test)
-    yw_train_s = scaler_yw.fit_transform(yw_train)
-    yw_test_s = scaler_yw.transform(yw_test)
+    X_train_s = scaler_x.fit_transform(X_train)
+    X_test_s = scaler_x.transform(X_test)
+
+    scaler_y.fit(y_train)
+    y_train_s =scaler_y.transform(y_train)
+    y_test_s = scaler_y.transform(y_test)
+
+    y_train_s_combined = scale_combined(y_train_comb_raw, scaler_y)
+    y_test_s_combined = scale_combined(y_test_comb_raw, scaler_y)
 
     test_idx = data.index[test_start_index:]
 
-    return Xw_train_s, Xw_test_s, yw_train_s, yw_test_s, scaler_yw, data.index, test_idx
+    return X_train_s, X_test_s, y_train_s, y_test_s, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined
 
 def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model):
     data = pd.read_csv(filepath, delimiter=';', parse_dates=['Date'], dayfirst=True)
@@ -323,20 +359,10 @@ def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, 
         data.loc[data['B4_PT40_N_Aver'] < 40, 'B4_PT40_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] < 40, 'B1_N_Aver'] = 0
 
-        #data = data.drop(data[(data['B1_N_Aver'] < 125) & (data['B1_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B2_N_Aver'] < 125) & (data['B2_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B3_N_Aver'] < 125) & (data['B3_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_GT41_N_Aver'] < 50) & (data['B4_GT41_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_GT42_N_Aver'] < 50) & (data['B4_GT42_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_PT40_N_Aver'] < 40) & (data['B4_PT40_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['TEC_N_Aver'] == 0)].index)
-
         data['B1_Available_N'] = data['B1_inWork'] * 250
         data['B2_Available_N'] = data['B2_inWork'] * 250
         data['B3_Available_N'] = data['B3_inWork'] * 250
-        # data['B4_Available_N'] = np.where(data['T'] < -2,
-        #    (data['B4_GT41_inWork'] * 160 + data['B4_GT42_inWork'] * 160 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])),
-        #    (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])))
+
         data['B4_Available_N'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
                     data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
 
@@ -383,14 +409,17 @@ def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, 
         data.loc[data['B2_N_Aver'] < 50, 'B2_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] < 50, 'TEC_N_Aver'] = 0
 
-        #data = data.drop(data[(data['B1_N_Aver'] < 50) & (data['B1_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B2_N_Aver'] < 50) & (data['B2_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['TEC_N_Aver'] == 0)].index)
-
-        data['B1_Available_N'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
+        data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                     data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
-        data['B2_Available_N'] = (data['B2_GT21_inWork'] * 70 + data['B2_GT22_inWork'] * 70 + 26 * (
+        data['B2_Available_Nmax'] = (data['B2_GT21_inWork'] * 70 + data['B2_GT22_inWork'] * 70 + 26 * (
                     data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax']
+
+        data['B1_Available_Nmin'] = (data['B1_GT11_inWork'] * 30 + data['B1_GT12_inWork'] * 30 + 15 * (
+                    data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
+        data['B2_Available_Nmin'] = (data['B2_GT21_inWork'] * 30 + data['B2_GT22_inWork'] * 30 + 15 * (
+                    data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin']
 
         data.dropna(inplace=True)
 
@@ -409,21 +438,35 @@ def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, 
             ['T', 'Month_sin', 'Month_cos', 'Year',
              'B1_GT11_inWork', 'B1_GT12_inWork', 'B2_GT21_inWork', 'B2_GT22_inWork',
              'B1_inWork', 'B2_inWork',
-             'B1_Available_N', 'B2_Available_N', 'TEC_N_Aver_pred']].values
+             'B1_Available_Nmax', 'B2_Available_Nmax',
+             'B1_Available_Nmin', 'B2_Available_Nmin',
+             'TEC_N_Aver_pred']].values
         y = data.loc[:, [calc_goal + '_N_Aver']].values
+
+        y_true_combined = data.loc[:, [calc_goal + '_N_Aver', calc_goal + '_Available_Nmax',
+                                       calc_goal + '_Available_Nmin']].values
 
     n = test_start_index
     X_train, X_test = X[:n], X[n:]
     y_train, y_test = y[:n], y[n:]
+    y_train_comb_raw, y_test_comb_raw = y_true_combined[:n], y_true_combined[n:]
 
     scaler_x = MinMaxScaler()
     scaler_y = MinMaxScaler()
 
     X_train_s = scaler_x.fit_transform(X_train)
     X_test_s = scaler_x.transform(X_test)
-    y_train_s = scaler_y.fit_transform(y_train)
+
+    scaler_y.fit(y_train)
+    y_train_s =scaler_y.transform(y_train)
     y_test_s = scaler_y.transform(y_test)
-    return X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, data.index, test_idx
+
+    y_train_s_combined = scale_combined(y_train_comb_raw, scaler_y)
+    y_test_s_combined = scale_combined(y_test_comb_raw, scaler_y)
+
+    test_idx = data.index[test_start_index:]
+
+    return X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined
 
 def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model):
 
@@ -550,10 +593,17 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data.loc[data['B2_N_Aver'] < 50, 'B2_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] < 50, 'TEC_N_Aver'] = 0
 
-        data['B1_Available_N'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
-                data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
-        data['B2_Available_N'] = (data['B2_GT21_inWork'] * 70 + data['B2_GT22_inWork'] * 70 + 26 * (
-                data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
+                    data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
+        data['B2_Available_Nmax'] = (data['B2_GT21_inWork'] * 70 + data['B2_GT22_inWork'] * 70 + 26 * (
+                    data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax']
+
+        data['B1_Available_Nmin'] = (data['B1_GT11_inWork'] * 30 + data['B1_GT12_inWork'] * 30 + 15 * (
+                    data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
+        data['B2_Available_Nmin'] = (data['B2_GT21_inWork'] * 30 + data['B2_GT22_inWork'] * 30 + 15 * (
+                    data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin']
 
         data.dropna(inplace=True)
 
@@ -574,38 +624,62 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data['Year_Prev'] = data['Year'].shift(1)
         data['B1_N_Aver_Prev'] = data['B1_N_Aver'].shift(1)
         data['B2_N_Aver_Prev'] = data['B2_N_Aver'].shift(1)
-        data['B1_Available_N_Prev'] = data['B1_Available_N'].shift(1)
-        data['B2_Available_N_Prev'] = data['B2_Available_N'].shift(1)
+        data['B1_Available_Nmax_Prev'] = data['B1_Available_Nmax'].shift(1)
+        data['B2_Available_Nmax_Prev'] = data['B2_Available_Nmax'].shift(1)
+        data['B1_Available_Nmin_Prev'] = data['B1_Available_Nmin'].shift(1)
+        data['B2_Available_Nmin_Prev'] = data['B2_Available_Nmin'].shift(1)
+        data['TEC_Available_Nmax_Prev'] = data['TEC_Available_Nmax'].shift(1)
+        data['TEC_Available_Nmin_Prev'] = data['TEC_Available_Nmin'].shift(1)
         data['TEC_N_Aver_pred_Prev'] = data['TEC_N_Aver_pred'].shift(1)
 
         data.dropna(inplace=True)
 
-        Xw = data.loc[:,
+        X = data.loc[:,
              ['T', 'Month_sin', 'Month_cos', 'Year',
               'B1_inWork', 'B2_inWork',
-              'B1_Available_N', 'B2_Available_N', 'TEC_N_Aver_pred',
+              'B1_Available_Nmax', 'B2_Available_Nmax',
+              'B1_Available_Nmin', 'B2_Available_Nmin',
+              'TEC_Available_Nmin', 'TEC_Available_Nmax',
+              'TEC_N_Aver_pred',
               'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev', 'Year_Prev',
               'B1_N_Aver_Prev', 'B2_N_Aver_Prev',
-              'B1_Available_N_Prev', 'B2_Available_N_Prev',
+              'B1_Available_Nmax_Prev', 'B2_Available_Nmax_Prev',
+              'B1_Available_Nmin_Prev', 'B2_Available_Nmin_Prev',
+              'TEC_Available_Nmin_Prev', 'TEC_Available_Nmax_Prev',
               'TEC_N_Aver_pred_Prev',
               ]].values
-        yw = data.loc[:, [calc_goal + '_N_Aver']].values
+        y = data.loc[:, [calc_goal + '_N_Aver']].values
+
+        y_true_combined = data.loc[:, [calc_goal + '_N_Aver', calc_goal + '_Available_Nmax',
+                                       calc_goal + '_Available_Nmin']].values
 
     n = test_start_index
+    X_train, X_test = X[:n], X[n:]
+    y_train, y_test = y[:n], y[n:]
+    y_train_comb_raw, y_test_comb_raw = y_true_combined[:n], y_true_combined[n:]
 
-    Xw_train, Xw_test = Xw[:n], Xw[n:]
-    yw_train, yw_test = yw[:n], yw[n:]
+    scaler_x = MinMaxScaler()
+    scaler_y = MinMaxScaler()
 
-    scaler_xw = MinMaxScaler()
-    scaler_yw = MinMaxScaler()
+    X_train_s = scaler_x.fit_transform(X_train)
+    X_test_s = scaler_x.transform(X_test)
 
-    Xw_train_s = scaler_xw.fit_transform(Xw_train)
-    Xw_test_s = scaler_xw.transform(Xw_test)
-    yw_train_s = scaler_yw.fit_transform(yw_train)
-    yw_test_s = scaler_yw.transform(yw_test)
+    scaler_y.fit(y_train)
+    y_train_s =scaler_y.transform(y_train)
+    y_test_s = scaler_y.transform(y_test)
+
+    y_train_s_combined = scale_combined(y_train_comb_raw, scaler_y)
+    y_test_s_combined = scale_combined(y_test_comb_raw, scaler_y)
+
+    print('X_train_s:',X_train_s.shape)
+    print('X_test_s:',X_test_s.shape)
+    print('y_train_s:',y_train_s.shape)
+    print('y_test_s:',y_test_s.shape)
+    print('y_train_s_combined:',y_train_s_combined.shape)
+    print('y_test_s_combined:',y_test_s_combined.shape)
 
     test_idx = data.index[test_start_index:]
-    return Xw_train_s, Xw_test_s, yw_train_s, yw_test_s, scaler_yw, data.index, test_idx
+    return X_train_s, X_test_s, y_train_s, y_test_s, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined
 
 def prepare_step_data(filepath, test_start_index, n_out):
     data = pd.read_csv(filepath, delimiter=';', parse_dates=['Date'], dayfirst=True)
@@ -1098,8 +1172,9 @@ def optuna_cbr_search(trial, X_train, y_train, X_test, y_test, scaler_y):
     model.fit(X_train, y_train, eval_set=(X_test, y_test), use_best_model=True, callbacks=[pruning_callback])
 
     preds = model.predict(X_test)
-    yhat = scaler_y.inverse_transform(preds.reshape(-1, 1))
-    mae = metrics.mean_absolute_error(y_test, yhat)
+    y_pred_unscaled = scaler_y.inverse_transform(preds.reshape(-1, 1))
+    y_test_unscaled = scaler_y.inverse_transform(y_test.reshape(-1, 1))
+    mae = metrics.mean_absolute_error(y_pred_unscaled, y_test_unscaled)
 
     return mae
 def optuna_rfr_search(trial, X_train, y_train, X_test, y_test, scaler_y):
@@ -1122,9 +1197,8 @@ def optuna_rfr_search(trial, X_train, y_train, X_test, y_test, scaler_y):
     mae = metrics.mean_absolute_error(y_true, yhat)
 
     return mae
-
-def optuna_lstm_search(trial, X_train, y_train, X_test, y_test, scaler_y, input_shape):
-    optuna.logging.set_verbosity(optuna.logging.WARNING)
+def optuna_lstm_search(trial, X_train, y_train, X_test, y_test, scaler_y, input_shape, y_train_s_combined, y_test_s_combined):
+    #optuna.logging.set_verbosity(optuna.logging.WARNING)
     n_units_lstm = trial.suggest_int('n_units_lstm', 20, 150) if trial else 50
     n_units_dense = trial.suggest_int('n_units_dense', 10, 50) if trial else 25
     lr = trial.suggest_float('lr', 1e-4, 1e-2, log=True) if trial else 0.001
@@ -1135,7 +1209,33 @@ def optuna_lstm_search(trial, X_train, y_train, X_test, y_test, scaler_y, input_
         Dense(1)
     ])
     optimizer = Adam(learning_rate=lr)
-    model.compile(optimizer=optimizer, loss='mae')
-    model.fit(X_train, y_train, epochs=10, batch_size=32, verbose=0)
-    loss = model.evaluate(X_train, y_train, verbose=0)
-    return loss
+    model.compile(optimizer=optimizer, loss=custom_loss)
+    model.fit(X_train, y_train_s_combined, validation_data=(X_test, y_test_s_combined), epochs=10, batch_size=32, verbose=0)
+    pred_lstm_s = model.predict(X_test)
+    y_pred_unscaled = scaler_y.inverse_transform(pred_lstm_s)
+    y_test_unscaled = scaler_y.inverse_transform(y_test)
+    mae = metrics.mean_absolute_error(y_pred_unscaled, y_test_unscaled)
+    return mae
+
+@tf.keras.utils.register_keras_serializable()
+def custom_loss(y_true_combined, y_pred):
+    lambda_bounds = 25.0
+
+    y_true = y_true_combined[:, 0:1]
+    avail_nmax = y_true_combined[:, 1:2]
+    avail_nmin = y_true_combined[:, 2:3]
+
+    base_loss = tf.reduce_mean(tf.abs(y_true - y_pred))
+
+    upper_penalty = tf.reduce_mean(tf.square(tf.maximum(0.0, y_pred - avail_nmax)))
+
+    lower_penalty = tf.reduce_mean(tf.square(tf.maximum(0.0, avail_nmin - y_pred)))
+
+    total_loss = base_loss + lambda_bounds * tf.reduce_mean(upper_penalty + lower_penalty)
+    return total_loss
+
+def scale_combined(combined_data, scaler):
+    col0 = scaler.transform(combined_data[:, 0:1])
+    col1 = scaler.transform(combined_data[:, 1:2])
+    col2 = scaler.transform(combined_data[:, 2:3])
+    return np.column_stack([col0, col1, col2])
