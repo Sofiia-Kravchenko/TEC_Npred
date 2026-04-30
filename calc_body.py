@@ -13,7 +13,7 @@ from forecast_models.CBRDirectForecast import train_cbr_direct_multistep
 from forecast_models.LSTMDirectForecast import train_lstm_direct_multistep
 from forecast_models.models import (
     get_catboost, get_linear, get_lstm,
-    get_mlp, get_rfr, get_simple_mlp
+    get_mlp, get_rfr
 )
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from tensorflow.keras.models import load_model
@@ -35,23 +35,11 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
     X_test_lstm = X_test_s.reshape((X_test_s.shape[0], 1, X_test_s.shape[1]))
 
     checkpoint_filepath = checkpoint_dir + checkpoint_unit_type +'_LSTM.keras'
+    params_filepath = checkpoint_dir + checkpoint_unit_type + '_LSTM_params.json'
     model_checkpoint_callback = ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=False,
                                                 monitor='val_loss', mode='min', save_best_only=True, verbose=0)
 
-    model_lstm = get_lstm((1, X_train_s.shape[1]), X_train_lstm, X_test_lstm, y_train_s, y_test_s, y_train, y_test, scaler_y, y_train_s_combined, y_test_s_combined)
-
-    if os.path.exists(checkpoint_filepath):
-        print("Loading model for further training...")
-        model_lstm = load_model(checkpoint_filepath)
-        model_lstm.optimizer.learning_rate.assign(1e-4)
-        current_epochs = 50
-        early_stop_callback = EarlyStopping(monitor='val_loss', patience=10, verbose=0, restore_best_weights=True,
-                                            min_delta=0.0001)
-    else:
-        print("Checkpoint not found, starting training...")
-        current_epochs = 1000
-        early_stop_callback = EarlyStopping(monitor='val_loss', patience=100, verbose=1, restore_best_weights=True,
-                                            min_delta=0.0001)
+    model_lstm, early_stop_callback, current_epochs = get_lstm((1, X_train_s.shape[1]), X_train_lstm, X_test_lstm, y_train_s, y_test_s, y_train, y_test, scaler_y, y_train_s_combined, y_test_s_combined, checkpoint_filepath, params_filepath)
 
     model_lstm.fit(
         X_train_lstm, y_train_s_combined,
@@ -65,6 +53,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
 
     pred_lstm_s = model_lstm.predict(X_test_lstm)
     y_pred_unscaled = scaler_y.inverse_transform(pred_lstm_s)
+    y_pred_unscaled[y_pred_unscaled < y_test_s_combined[:, 2][:, None]] = 0
     results['LSTM'] = np.maximum(y_pred_unscaled, 0)
 
     # ---  Linear Regression ---
@@ -72,6 +61,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
     model_lr = get_linear()
     model_lr.fit(X_train_s, y_train)
     y_pred_unscaled = model_lr.predict(X_test_s)
+    y_pred_unscaled[y_pred_unscaled < y_test_s_combined[:, 2][:, None]] = 0
     results['Linear'] = np.maximum(y_pred_unscaled, 0)
 
     # ---  poly Regression ---
@@ -83,6 +73,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
     model_poly = get_linear()
     model_poly.fit(X_train_poly, y_train)
     y_pred_unscaled = model_poly.predict(X_test_poly)
+    y_pred_unscaled[y_pred_unscaled < y_test_s_combined[:, 2][:, None]] = 0
     results['Polynomial (d=2)'] = np.maximum(y_pred_unscaled, 0)
 
     # ---  Gradient Boosting ---
@@ -91,60 +82,18 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
     model_cb.fit(X_train_s, y_train_s, eval_set=(X_test_s, y_test_s), early_stopping_rounds=250, use_best_model=True)
     y_test_pred = model_cb.predict(X_test_s).reshape(-1, 1)
     y_pred_unscaled = scaler_y.inverse_transform(y_test_pred)
+    y_pred_unscaled[y_pred_unscaled < y_test_s_combined[:, 2][:, None]] = 0
     results['Boosting'] = np.maximum(y_pred_unscaled, 0)
-
-    # ---  simple MLP ---
-    print('sMLP_Stat_Model')
-    model_smlp = get_simple_mlp((X_train_s.shape[1],))
-
-    checkpoint_filepath = checkpoint_dir+checkpoint_unit_type+'_sMLP.keras'
-    model_checkpoint_callback = ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=False,
-                                                monitor='val_loss', mode='min', save_best_only=True, verbose=0)
-    if os.path.exists(checkpoint_filepath):
-        print("Loading model for further training...")
-        model_smlp = load_model(checkpoint_filepath)
-        model_smlp.optimizer.learning_rate.assign(1e-4)
-        current_epochs = 50
-        early_stop_callback = EarlyStopping(monitor='val_loss', patience=10, verbose=0, restore_best_weights=True,
-                                            min_delta=0.0001)
-    else:
-        print("Checkpoint not found, starting training...")
-        current_epochs = 1000
-        early_stop_callback = EarlyStopping(monitor='val_loss', patience=100, verbose=1, restore_best_weights=True,
-                                            min_delta=0.0001)
-
-    model_smlp.fit(X_train_s ,
-                y_train_s_combined,
-                epochs=current_epochs,
-                batch_size=30,
-                validation_data=(X_test_s, y_test_s_combined),
-                validation_batch_size=30,
-                callbacks=[early_stop_callback,model_checkpoint_callback],
-                verbose=0,
-                shuffle=False)
-    y_test_pred_scaled = model_smlp.predict(X_test_s)
-    y_pred_unscaled = scaler_y.inverse_transform(y_test_pred_scaled)
-    results['simple_MLP'] = np.maximum(y_pred_unscaled, 0)
 
     # ---  MLP ---
     print('MLP_Stat_Model')
-    model_mlp = get_mlp((X_train_s.shape[1],))
 
-    checkpoint_filepath = checkpoint_dir+checkpoint_unit_type+'_MLP.keras'
+    checkpoint_filepath = checkpoint_dir + checkpoint_unit_type + '_MLP.keras'
+    params_filepath = checkpoint_dir + checkpoint_unit_type + '_MLP_params.json'
     model_checkpoint_callback = ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=False,
                                                 monitor='val_loss', mode='min', save_best_only=True, verbose=0)
-    if os.path.exists(checkpoint_filepath):
-        print("Loading model for further training...")
-        model_mlp = load_model(checkpoint_filepath)
-        model_mlp.optimizer.learning_rate.assign(1e-4)
-        current_epochs = 50
-        early_stop_callback = EarlyStopping(monitor='val_loss', patience=10, verbose=0, restore_best_weights=True,
-                                            min_delta=0.0001)
-    else:
-        print("Checkpoint not found, starting training...")
-        current_epochs = 1000
-        early_stop_callback = EarlyStopping(monitor='val_loss', patience=100, verbose=1, restore_best_weights=True,
-                                            min_delta=0.0001)
+
+    model_mlp, early_stop_callback, current_epochs = get_mlp((X_train_s.shape[1],), X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, y_train_s_combined, y_test_s_combined, checkpoint_filepath, params_filepath)
 
     model_mlp.fit(X_train_s ,
                 y_train_s_combined,
@@ -158,6 +107,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
 
     y_test_pred_scaled = model_mlp.predict(X_test_s)
     y_pred_unscaled = scaler_y.inverse_transform(y_test_pred_scaled)
+    y_pred_unscaled[y_pred_unscaled < y_test_s_combined[:, 2][:, None]] = 0
     results['MLP'] = np.maximum(y_pred_unscaled, 0)
 
     # ---  Random Forest Regression---
@@ -166,6 +116,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
     model_rfr.fit(X_train_s, y_train_s)
     y_test_pred = model_rfr.predict(X_test_s).reshape(-1, 1)
     y_pred_unscaled = scaler_y.inverse_transform(y_test_pred)
+    y_pred_unscaled[y_pred_unscaled < y_test_s_combined[:, 2][:, None]] = 0
     results['RandomForest'] = np.maximum(y_pred_unscaled, 0)
 
     # ---  Gradient booster with window ---
@@ -174,6 +125,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
     model_cbw.fit(Xw_train_s, yw_train_s, eval_set=(Xw_test_s, yw_test_s), early_stopping_rounds=250, use_best_model=True)
     yw_test_pred = model_cbw.predict(Xw_test_s).reshape(-1, 1)
     y_pred_unscaled = scaler_yw.inverse_transform(yw_test_pred)
+    y_pred_unscaled[y_pred_unscaled < yw_test_s_combined[:, 2][:, None]] = 0
     results['Boosting_with_window'] = np.maximum(y_pred_unscaled, 0)
 
     # ---  LSTM with window ---
@@ -181,29 +133,14 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
 
     Xw_train_lstm = Xw_train_s.reshape((Xw_train_s.shape[0], 1, Xw_train_s.shape[1]))
     Xw_test_lstm = Xw_test_s.reshape((Xw_test_s.shape[0], 1, Xw_test_s.shape[1]))
-    print('Xw_train_lstm: ', Xw_train_lstm.shape)
-    print('yw_train_s_combined: ', yw_train_s_combined.shape)
-    print('Xw_test_lstm: ', Xw_test_lstm.shape)
-    print('yw_test_s_combined: ', yw_test_s_combined.shape)
 
-    checkpoint_filepath = checkpoint_dir+checkpoint_unit_type+'_LSTM_with_RW.keras'
+    checkpoint_filepath = checkpoint_dir + checkpoint_unit_type +'_LSTM_with_RW.keras'
+    params_filepath = checkpoint_dir + checkpoint_unit_type + '_LSTM_with_RW_params.json'
     model_checkpoint_callback = ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=False,
                                                 monitor='val_loss', mode='min', save_best_only=True, verbose=0)
 
-    model_lstmrw = get_lstm((1, Xw_train_s.shape[1]), Xw_train_lstm, Xw_test_lstm, yw_train_s, yw_test_s, y_train, y_test, scaler_yw, yw_train_s_combined, yw_test_s_combined)
+    model_lstmrw, early_stop_callback, current_epochs = get_lstm((1, Xw_train_s.shape[1]), Xw_train_lstm, Xw_test_lstm, yw_train_s, yw_test_s, y_train, y_test, scaler_yw, yw_train_s_combined, yw_test_s_combined, checkpoint_filepath, params_filepath)
 
-    if os.path.exists(checkpoint_filepath):
-        print("Loading model for further training...")
-        model_lstmrw = load_model(checkpoint_filepath)
-        model_lstmrw.optimizer.learning_rate.assign(1e-4)
-        current_epochs = 50
-        early_stop_callback = EarlyStopping(monitor='val_loss', patience=10, verbose=0, restore_best_weights=True,
-                                            min_delta=0.0001)
-    else:
-        print("Checkpoint not found, starting training...")
-        current_epochs = 1000
-        early_stop_callback = EarlyStopping(monitor='val_loss', patience=100, verbose=1, restore_best_weights=True,
-                                            min_delta=0.0001)
 
     model_lstmrw.fit(Xw_train_lstm, yw_train_s_combined,
                 epochs=current_epochs,
@@ -216,60 +153,18 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
 
     pred_lstm_s = model_lstmrw.predict(Xw_test_lstm)
     y_pred_unscaled = scaler_yw.inverse_transform(pred_lstm_s)
+    y_pred_unscaled[y_pred_unscaled < yw_test_s_combined[:, 2][:, None]] = 0
     results['LSTM_with_window'] = np.maximum(y_pred_unscaled, 0)
-
-    # ---  simple MLP with window---
-    print('sMLP_with_window_Stat_Model')
-    model_smlpw = get_simple_mlp((Xw_train_s.shape[1],))
-
-    checkpoint_filepath = checkpoint_dir+checkpoint_unit_type+'_sMLP_with_RW.keras'
-    model_checkpoint_callback = ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=False,
-                                                monitor='val_loss', mode='min', save_best_only=True, verbose=0)
-    if os.path.exists(checkpoint_filepath):
-        print("Loading model for further training...")
-        model_smlpw = load_model(checkpoint_filepath)
-        model_smlpw.optimizer.learning_rate.assign(1e-4)
-        current_epochs = 50
-        early_stop_callback = EarlyStopping(monitor='val_loss', patience=10, verbose=0, restore_best_weights=True,
-                                            min_delta=0.0001)
-    else:
-        print("Checkpoint not found, starting training...")
-        current_epochs = 1000
-        early_stop_callback = EarlyStopping(monitor='val_loss', patience=100, verbose=1, restore_best_weights=True,
-                                            min_delta=0.0001)
-
-    model_smlpw.fit(Xw_train_s,
-                yw_train_s_combined,
-                epochs=current_epochs,
-                batch_size=30,
-                validation_data=(Xw_test_s, yw_test_s_combined),
-                validation_batch_size=30,
-                callbacks=[early_stop_callback,model_checkpoint_callback],
-                verbose=0,
-                shuffle=False)
-    yw_test_pred_scaled = model_smlpw.predict(Xw_test_s)
-    y_pred_unscaled = scaler_yw.inverse_transform(yw_test_pred_scaled)
-    results['simple_MLP_with_window'] = np.maximum(y_pred_unscaled, 0)
 
     # ---  MLP with window---
     print('MLP_with_window_Stat_Model')
-    model_mlpw = get_mlp((Xw_train_s.shape[1],))
 
     checkpoint_filepath = checkpoint_dir + checkpoint_unit_type + '_MLP_with_RW.keras'
+    params_filepath = checkpoint_dir + checkpoint_unit_type + '_MLP_with_RW_params.json'
     model_checkpoint_callback = ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=False,
                                                 monitor='val_loss', mode='min', save_best_only=True, verbose=0)
-    if os.path.exists(checkpoint_filepath):
-        print("Loading model for further training...")
-        model_mlpw = load_model(checkpoint_filepath)
-        model_mlpw.optimizer.learning_rate.assign(1e-4)
-        current_epochs = 50
-        early_stop_callback = EarlyStopping(monitor='val_loss', patience=10, verbose=0, restore_best_weights=True,
-                                            min_delta=0.0001)
-    else:
-        print("Checkpoint not found, starting training...")
-        current_epochs = 1000
-        early_stop_callback = EarlyStopping(monitor='val_loss', patience=100, verbose=1, restore_best_weights=True,
-                                            min_delta=0.0001)
+
+    model_mlpw, early_stop_callback, current_epochs = get_mlp((Xw_train_s.shape[1],), Xw_train_s, Xw_test_s, yw_train_s, yw_test_s, y_train, y_test, scaler_yw, yw_train_s_combined, yw_test_s_combined, checkpoint_filepath, params_filepath)
 
     model_mlpw.fit(Xw_train_s,
                   yw_train_s_combined,
@@ -283,6 +178,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoin
 
     yw_test_pred_scaled = model_mlpw.predict(Xw_test_s)
     y_pred_unscaled = scaler_yw.inverse_transform(yw_test_pred_scaled)
+    y_pred_unscaled[y_pred_unscaled < yw_test_s_combined[:, 2][:, None]] = 0
     results['MLP_with_window'] = np.maximum(y_pred_unscaled, 0)
 
     # ---  LSTM direct forecast---

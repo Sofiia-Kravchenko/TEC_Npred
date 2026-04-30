@@ -15,7 +15,8 @@ from keras.callbacks import ModelCheckpoint, EarlyStopping
 from keras.layers import Dense, LSTM
 from sklearn import metrics
 
-from utils import prepare_meta_step_data, prepare_meta_direct_data
+from utils import prepare_meta_step_data, prepare_meta_direct_data, custom_loss
+
 tf.random.set_seed(42)
 
 def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, checkpoint_unit_type, results, best_window_model_name, test_idx, best_step_model, best_stat_model_name, calc_goal):
@@ -34,7 +35,7 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, ch
         all_steps_params = {}
 
     data_with_lag, base_features, weights_train = prepare_meta_step_data(data, train_size, n_out, results, best_window_model_name, best_stat_model_name, best_step_model,
-     test_idx)
+     test_idx, calc_goal)
 
     for i in range(n_out):
         step = i + 1
@@ -42,7 +43,7 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, ch
         current_checkpoint = f"{checkpoint_base}{i}.keras"
         print(f"\n=== Step training {step} ===")
 
-        X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test = prepare_meta_direct_data(data, data_with_lag, step, base_features, train_size, calc_goal)
+        X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test, y_train_s_combined, y_test_s_combined = prepare_meta_direct_data(data, data_with_lag, step, base_features, train_size, calc_goal)
 
         X_train_scaled = X_train_scaled.reshape((X_train_scaled.shape[0], 1, X_train_scaled.shape[1]))
         X_test_scaled = X_test_scaled.reshape((X_test_scaled.shape[0], 1, X_test_scaled.shape[1]))
@@ -68,9 +69,11 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, ch
                         Dense(n_dense, activation='relu'),
                         Dense(1)
                     ])
-                    m.compile(loss='mae', optimizer=Adam(learning_rate=lr))
-                    m.fit(X_train_scaled, y_train_scaled, epochs=5, batch_size=32, verbose=0)
-                    return m.evaluate(X_test_scaled, y_test_scaled, verbose=0)
+                    m.compile(loss=custom_loss, optimizer=Adam(learning_rate=lr))
+                    m.fit(X_train_scaled, y_train_s_combined, validation_data=(X_test_scaled, y_test_s_combined), epochs=10, batch_size=32, verbose=0,  callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_loss')])
+                    yp = scaler_y.inverse_transform(m.predict(X_test_scaled))
+                    mae = metrics.mean_absolute_error(y_test, yp)
+                    return mae
 
                 study = optuna.create_study(direction='minimize')
                 study.optimize(objective, n_trials=20)
@@ -84,7 +87,7 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, ch
                 Dense(params['n_dense'], activation='relu'),
                 Dense(1)
             ])
-            model.compile(loss='mae', optimizer=Adam(learning_rate=params['lr']), metrics=['mse'])
+            model.compile(loss=custom_loss, optimizer=Adam(learning_rate=params['lr']), metrics=['mse'])
 
             if i > 0:
                 prev_path = f"{checkpoint_base}{i - 1}.keras"
@@ -98,14 +101,15 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, ch
         checkpoint_callback = ModelCheckpoint(filepath=current_checkpoint, save_best_only=True, monitor='val_loss')
         early_stop_callback = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
 
-        model.fit(X_train_scaled, y_train_scaled,
+        model.fit(X_train_scaled, y_train_s_combined,
                   epochs=current_epochs,
                   batch_size=32,
-                  validation_data=(X_test_scaled, y_test_scaled),
+                  validation_data=(X_test_scaled, y_test_s_combined),
                   callbacks=[early_stop_callback, checkpoint_callback],
                   verbose=0, shuffle=False)
 
         yhat = scaler_y.inverse_transform(model.predict(X_test_scaled))
+        yhat[yhat < y_test_s_combined[:, 2][:, None]] = 0
         yhat = np.maximum(yhat, 0)
 
         results_list.append(yhat)

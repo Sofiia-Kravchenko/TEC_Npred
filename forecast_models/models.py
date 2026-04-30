@@ -1,16 +1,20 @@
 import json
+import os
 
 import optuna
 import tensorflow as tf
 
 from catboost import CatBoostRegressor
 from keras.optimizers import Adam
+from keras.src.saving import load_model
 from sklearn.ensemble import RandomForestRegressor
+from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 from sklearn.linear_model import LinearRegression
 
-from utils import optuna_cbr_search, optuna_rfr_search, optuna_lstm_search, scale_combined, custom_loss
+from utils import optuna_cbr_search, optuna_rfr_search, optuna_lstm_search, scale_combined, custom_loss, \
+    optuna_mlp_search
 
 tf.random.set_seed(42)
 
@@ -31,40 +35,73 @@ def get_catboost(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scal
                               verbose=0)
     return model
 
-def get_lstm(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, y_train_s_combined, y_test_s_combined):
-    study = optuna.create_study(direction='minimize')
-    study.optimize(lambda trial: optuna_lstm_search(trial, X_train_s, y_train_s,
-                                               X_test_s, y_test_s, scaler_y, input_shape, y_train_s_combined, y_test_s_combined), n_trials=20)
-    best_params = study.best_params
-    model = Sequential([
-        LSTM(best_params['n_units_lstm'], input_shape=input_shape),
-        Dense(best_params['n_units_dense']),
-        Dense(1)
-    ])
-    optimizer = Adam(learning_rate=best_params['lr'])
-    model.compile(optimizer=optimizer, loss=custom_loss)
-    return model
+def get_lstm(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, y_train_s_combined, y_test_s_combined, checkpoint_filepath, params_filepath):
+    if os.path.exists(checkpoint_filepath) and os.path.exists(params_filepath):
+        print("Loading model and best parameters...")
+        model = load_model(checkpoint_filepath, custom_objects={'custom_loss': custom_loss})
+
+        model.optimizer.learning_rate.assign(1e-4)
+
+        current_epochs = 50
+        early_stop_callback = EarlyStopping(monitor='val_loss', patience=10, verbose=0, restore_best_weights=True,
+                                            min_delta=0.0001)
+    else:
+        print("Starting hyperparameter optimization...")
+        study = optuna.create_study(direction='minimize')
+        study.optimize(lambda trial: optuna_lstm_search(trial, X_train_s, y_train_s,
+                                                   X_test_s, y_test_s, scaler_y, input_shape, y_train_s_combined, y_test_s_combined), n_trials=20)
+        best_params = study.best_params
+
+        with open(params_filepath, 'w') as f:json.dump(best_params, f)
+
+        current_epochs = 1000
+        early_stop_callback = EarlyStopping(monitor='val_loss', patience=100, verbose=1, restore_best_weights=True,
+                                            min_delta=0.0001)
+
+        model = Sequential([
+            LSTM(best_params['n_units_lstm'], input_shape=input_shape),
+            Dense(best_params['n_units_dense']),
+            Dense(1)
+        ])
+        optimizer = Adam(learning_rate=best_params['lr'])
+        model.compile(optimizer=optimizer, loss=custom_loss)
+    return model, early_stop_callback, current_epochs
 
 def get_linear():
     return LinearRegression()
 
-def get_simple_mlp(input_shape):
-    model = Sequential([
-            Dense(128, activation='relu',input_shape=input_shape),
-            Dense(1)
-        ])
-    model.compile(optimizer='adam', loss=custom_loss)
-    return model
+def get_mlp(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, y_train_s_combined, y_test_s_combined, checkpoint_filepath, params_filepath):
+    if os.path.exists(checkpoint_filepath) and os.path.exists(params_filepath):
+        print("Loading model and best parameters...")
+        model = load_model(checkpoint_filepath, custom_objects={'custom_loss': custom_loss})
 
-def get_mlp(input_shape):
-    model = Sequential([
-        Dense(64, activation='relu', kernel_initializer='he_normal'),
-        Dense(32, activation='relu'),
-        Dense(16, activation='relu'),
-        Dense(1)
-        ])
-    model.compile(optimizer='adam', loss=custom_loss)
-    return model
+        model.optimizer.learning_rate.assign(1e-4)
+
+        current_epochs = 50
+        early_stop_callback = EarlyStopping(monitor='val_loss', patience=10, verbose=0, restore_best_weights=True,
+                                            min_delta=0.0001)
+    else:
+        print("Starting hyperparameter optimization...")
+        study = optuna.create_study(direction='minimize')
+        study.optimize(lambda trial: optuna_mlp_search(trial, X_train_s, y_train_s,
+                                                   X_test_s, y_test_s, scaler_y, y_train_s_combined, y_test_s_combined), n_trials=20)
+        best_params = study.best_params
+
+        with open(params_filepath, 'w') as f:json.dump(best_params, f)
+
+        current_epochs = 1000
+        early_stop_callback = EarlyStopping(monitor='val_loss', patience=100, verbose=1, restore_best_weights=True,
+                                            min_delta=0.0001)
+
+        model = Sequential()
+        for i in range(best_params['n_layers']):
+            model.add(Dense(best_params[f'units_l{i}'], activation='relu'))
+
+        model.add(Dense(1))
+
+        optimizer = Adam(learning_rate=best_params['lr'])
+        model.compile(optimizer=optimizer, loss=custom_loss)
+    return model, early_stop_callback, current_epochs
 
 def get_rfr(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y):
     study = optuna.create_study(direction="minimize")
