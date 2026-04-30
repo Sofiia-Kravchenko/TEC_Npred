@@ -12,6 +12,11 @@ from pandas import DataFrame, concat
 from optuna.integration import CatBoostPruningCallback
 import tensorflow as tf
 
+goal_mapping = {
+    "data/TEC22_Data.csv": ["B1", "B2", "B3", "B4", "TEC"],
+    "data/TEC14_Data.csv": ["B1", "B2", "TEC"]
+}
+
 def prepare_stat_data(filepath, test_start_index):
     data = pd.read_csv(filepath, delimiter=';', parse_dates=['Date'], dayfirst=True)
 
@@ -31,46 +36,49 @@ def prepare_stat_data(filepath, test_start_index):
         data['B4_GT42_N_Aver'] = data['B4_GT42_N'] / 24
         data['B4_PT40_N_Aver'] = data['B4_N_Aver'] - data['B4_GT41_N_Aver'] - data['B4_GT42_N_Aver']
 
-        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 125, 1, 0)
-        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 125, 1, 0)
-        data['B3_inWork'] = np.where(data['B3_N_Aver'] > 125, 1, 0)
-        data['B4_GT41_inWork'] = np.where(data['B4_GT41_N_Aver'] > 50, 1, 0)
-        data['B4_GT42_inWork'] = np.where(data['B4_GT42_N_Aver'] > 50, 1, 0)
-        data['B4_inWork'] = np.where(data['B4_N_Aver'] > 40, 1, 0)
+        data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 125, 1, 0)
+        data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 125, 1, 0)
+        data['B3_inWork'] = np.where(data['B3_N_Aver'] >= 125, 1, 0)
+        data['B4_GT41_inWork'] = np.where(data['B4_GT41_N_Aver'] >= 50, 1, 0)
+        data['B4_GT42_inWork'] = np.where(data['B4_GT42_N_Aver'] >= 50, 1, 0)
+        data['B4_inWork'] = np.where(data['B4_N_Aver'] >= 76, 1, 0)
 
         data.loc[data['B1_N_Aver'] < 125, 'B1_N_Aver'] = 0
         data.loc[data['B2_N_Aver'] < 125, 'B2_N_Aver'] = 0
         data.loc[data['B3_N_Aver'] < 125, 'B3_N_Aver'] = 0
-        data.loc[data['B4_GT41_N_Aver'] < 50, 'B4_GT41_N_Aver'] = 0
-        data.loc[data['B4_GT42_N_Aver'] < 50, 'B4_GT42_N_Aver'] = 0
-        data.loc[data['B4_PT40_N_Aver'] < 40, 'B4_PT40_N_Aver'] = 0
-        data.loc[data['TEC_N_Aver'] < 40, 'B1_N_Aver'] = 0
+        data.loc[data['B4_GT41_N_Aver'] <= 50, 'B4_GT41_N_Aver'] = 0
+        data.loc[data['B4_GT42_N_Aver'] <= 50, 'B4_GT42_N_Aver'] = 0
+        data.loc[data['B4_N_Aver'] <= 76, 'B4_N_Aver'] = 0
+        data.loc[data['TEC_N_Aver'] <= 50, 'TEC_N_Aver'] = 0
 
-        #data = data.drop(data[(data['B1_N_Aver'] < 125) & (data['B1_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B2_N_Aver'] < 125) & (data['B2_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B3_N_Aver'] < 125) & (data['B3_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_GT41_N_Aver'] < 50) & (data['B4_GT41_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_GT42_N_Aver'] < 50) & (data['B4_GT42_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_PT40_N_Aver'] < 40) & (data['B4_PT40_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['TEC_N_Aver'] == 0)].index)
+        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT41_N_Aver')
+        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT42_N_Aver')
 
-        data['B1_Available_N'] = data['B1_inWork'] * 250
-        data['B2_Available_N'] = data['B2_inWork'] * 250
-        data['B3_Available_N'] = data['B3_inWork'] * 250
-        # data['B4_Available_N'] = np.where(data['T'] < -2,
-        #    (data['B4_GT41_inWork'] * 160 + data['B4_GT42_inWork'] * 160 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])),
-        #    (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])))
-        data['B4_Available_N'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
+        data['B1_Available_Nmax'] = data['B1_inWork'] * 250
+        data['B2_Available_Nmax'] = data['B2_inWork'] * 250
+        data['B3_Available_Nmax'] = data['B3_inWork'] * 250
+        data['B4_Available_Nmax'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
                     data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax']+ data['B4_Available_Nmax']
+
+        data['B1_Available_Nmin'] = data['B1_inWork'] * 125
+        data['B2_Available_Nmin'] = data['B2_inWork'] * 125
+        data['B3_Available_Nmin'] = data['B3_inWork'] * 125
+        data['B4_Available_Nmin'] = (data['B4_GT41_inWork'] * 50 + data['B4_GT42_inWork'] * 50 + 26 * (
+                    data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin']+ data['B4_Available_Nmin']
 
         data.dropna(inplace=True)
         print(data.shape)
         data.set_index('Date', inplace=True)
 
-        X = data.loc[:, ['T',  'Month_sin', 'Month_cos', 'Year',
-                        'B1_inWork', 'B2_inWork', 'B3_inWork', 'B4_GT41_inWork', 'B4_GT42_inWork', 'B4_inWork',
-                        'B1_Available_N', 'B2_Available_N', 'B3_Available_N', 'B4_Available_N']].values
+        X = data.loc[:, ['T',  'Month_sin', 'Month_cos',
+                        'B1_Available_Nmax', 'B2_Available_Nmax', 'B3_Available_Nmax', 'B4_Available_Nmax', 'TEC_Available_Nmax',
+                        'B1_Available_Nmin', 'B2_Available_Nmin', 'B3_Available_Nmin', 'B4_Available_Nmin', 'TEC_Available_Nmin']].values
         y = data.loc[:, ['TEC_N_Aver']].values
+
+        y_true_combined = data.loc[:, ['TEC_N_Aver', 'TEC_Available_Nmax',
+                                       'TEC_Available_Nmin']].values
 
     if filepath == 'data/TEC14_Data.csv':
         data['B1_GT11_N_Aver'] = data['B1_GT11_N'] / 24
@@ -85,16 +93,20 @@ def prepare_stat_data(filepath, test_start_index):
         data['B1_GT12_inWork'] = np.where(data['B1_GT12_N_Aver'] >= 30, 1, 0)
         data['B2_GT21_inWork'] = np.where(data['B2_GT21_N_Aver'] >= 30, 1, 0)
         data['B2_GT22_inWork'] = np.where(data['B2_GT22_N_Aver'] >= 30, 1, 0)
-        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 50, 1, 0)
-        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 50, 1, 0)
+        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 45, 1, 0)
+        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 45, 1, 0)
 
         data.loc[data['B1_GT11_N_Aver'] < 30, 'B1_GT11_N_Aver'] = 0
         data.loc[data['B1_GT12_N_Aver'] < 30, 'B1_GT12_N_Aver'] = 0
         data.loc[data['B2_GT21_N_Aver'] < 30, 'B2_GT21_N_Aver'] = 0
         data.loc[data['B2_GT22_N_Aver'] < 30, 'B2_GT22_N_Aver'] = 0
-        data.loc[data['B1_N_Aver'] < 50, 'B1_N_Aver'] = 0
-        data.loc[data['B2_N_Aver'] < 50, 'B2_N_Aver'] = 0
-        data.loc[data['TEC_N_Aver'] < 50, 'TEC_N_Aver'] = 0
+        data.loc[data['B1_N_Aver'] < 45, 'B1_N_Aver'] = 0
+        data.loc[data['B2_N_Aver'] < 45, 'B2_N_Aver'] = 0
+        data.loc[data['TEC_N_Aver'] < 45, 'TEC_N_Aver'] = 0
+        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT11_N_Aver')
+        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT12_N_Aver')
+        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT21_N_Aver')
+        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT22_N_Aver')
 
         data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                     data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
@@ -162,37 +174,39 @@ def prepare_window_data(filepath, test_start_index):
         data['B4_GT42_N_Aver'] = data['B4_GT42_N'] / 24
         data['B4_PT40_N_Aver'] = data['B4_N_Aver'] - data['B4_GT41_N_Aver'] - data['B4_GT42_N_Aver']
 
-        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 125, 1, 0)
-        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 125, 1, 0)
-        data['B3_inWork'] = np.where(data['B3_N_Aver'] > 125, 1, 0)
-        data['B4_GT41_inWork'] = np.where(data['B4_GT41_N_Aver'] > 50, 1, 0)
-        data['B4_GT42_inWork'] = np.where(data['B4_GT42_N_Aver'] > 50, 1, 0)
-        data['B4_inWork'] = np.where(data['B4_N_Aver'] > 40, 1, 0)
+        data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 125, 1, 0)
+        data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 125, 1, 0)
+        data['B3_inWork'] = np.where(data['B3_N_Aver'] >= 125, 1, 0)
+        data['B4_GT41_inWork'] = np.where(data['B4_GT41_N_Aver'] >= 50, 1, 0)
+        data['B4_GT42_inWork'] = np.where(data['B4_GT42_N_Aver'] >= 50, 1, 0)
+        data['B4_inWork'] = np.where(data['B4_N_Aver'] >= 76, 1, 0)
 
         data.loc[data['B1_N_Aver'] < 125, 'B1_N_Aver'] = 0
         data.loc[data['B2_N_Aver'] < 125, 'B2_N_Aver'] = 0
         data.loc[data['B3_N_Aver'] < 125, 'B3_N_Aver'] = 0
-        data.loc[data['B4_GT41_N_Aver'] < 50, 'B4_GT41_N_Aver'] = 0
-        data.loc[data['B4_GT42_N_Aver'] < 50, 'B4_GT42_N_Aver'] = 0
-        data.loc[data['B4_PT40_N_Aver'] < 40, 'B4_PT40_N_Aver'] = 0
-        data.loc[data['TEC_N_Aver'] < 40, 'B1_N_Aver'] = 0
+        data.loc[data['B4_GT41_N_Aver'] <= 50, 'B4_GT41_N_Aver'] = 0
+        data.loc[data['B4_GT42_N_Aver'] <= 50, 'B4_GT42_N_Aver'] = 0
+        data.loc[data['B4_N_Aver'] <= 76, 'B4_N_Aver'] = 0
+        data.loc[data['TEC_N_Aver'] <= 50, 'TEC_N_Aver'] = 0
 
-        #data = data.drop(data[(data['B1_N_Aver'] < 125) & (data['B1_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B2_N_Aver'] < 125) & (data['B2_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B3_N_Aver'] < 125) & (data['B3_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_GT41_N_Aver'] < 50) & (data['B4_GT41_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_GT42_N_Aver'] < 50) & (data['B4_GT42_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_PT40_N_Aver'] < 40) & (data['B4_PT40_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['TEC_N_Aver'] == 0)].index)
+        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT41_N_Aver')
+        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT42_N_Aver')
 
-        data['B1_Available_N'] = data['B1_inWork'] * 250
-        data['B2_Available_N'] = data['B2_inWork'] * 250
-        data['B3_Available_N'] = data['B3_inWork'] * 250
-        # data['B4_Available_N'] = np.where(data['T'] < -2,
-        #    (data['B4_GT41_inWork'] * 160 + data['B4_GT42_inWork'] * 160 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])),
-        #    (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])))
-        data['B4_Available_N'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
-                    data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['B1_Available_Nmax'] = data['B1_inWork'] * 250
+        data['B2_Available_Nmax'] = data['B2_inWork'] * 250
+        data['B3_Available_Nmax'] = data['B3_inWork'] * 250
+        data['B4_Available_Nmax'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
+                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax'] + \
+                                     data['B4_Available_Nmax']
+
+        data['B1_Available_Nmin'] = data['B1_inWork'] * 125
+        data['B2_Available_Nmin'] = data['B2_inWork'] * 125
+        data['B3_Available_Nmin'] = data['B3_inWork'] * 125
+        data['B4_Available_Nmin'] = (data['B4_GT41_inWork'] * 50 + data['B4_GT42_inWork'] * 50 + 26 * (
+                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin'] + \
+                                     data['B4_Available_Nmin']
 
         data['T_Prev'] = data['T'].shift(1)
         data['Month_sin_Prev'] = data['Month_sin'].shift(1)
@@ -205,25 +219,34 @@ def prepare_window_data(filepath, test_start_index):
         data['B2_N_Aver_Prev'] = data['B2_N_Aver'].shift(1)
         data['B3_N_Aver_Prev'] = data['B3_N_Aver'].shift(1)
         data['B4_N_Aver_Prev'] = data['B4_N_Aver'].shift(1)
-        data['B1_Available_N_Prev'] = data['B1_Available_N'].shift(1)
-        data['B2_Available_N_Prev'] = data['B2_Available_N'].shift(1)
-        data['B3_Available_N_Prev'] = data['B3_Available_N'].shift(1)
-        data['B4_Available_N_Prev'] = data['B4_Available_N'].shift(1)
+        data['B1_Available_Nmin_Prev'] = data['B1_Available_Nmin'].shift(1)
+        data['B2_Available_Nmin_Prev'] = data['B2_Available_Nmin'].shift(1)
+        data['B3_Available_Nmin_Prev'] = data['B3_Available_Nmin'].shift(1)
+        data['B4_Available_Nmin_Prev'] = data['B4_Available_Nmin'].shift(1)
+        data['TEC_Available_Nmin_Prev'] = data['TEC_Available_Nmin'].shift(1)
+        data['B1_Available_Nmax_Prev'] = data['B1_Available_Nmax'].shift(1)
+        data['B2_Available_Nmax_Prev'] = data['B2_Available_Nmax'].shift(1)
+        data['B3_Available_Nmax_Prev'] = data['B3_Available_Nmax'].shift(1)
+        data['B4_Available_Nmax_Prev'] = data['B4_Available_Nmax'].shift(1)
+        data['TEC_Available_Nmax_Prev'] = data['TEC_Available_Nmax'].shift(1)
         data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
 
         data.dropna(inplace=True)
 
         data.set_index('Date', inplace=True)
 
-        Xw = data.loc[:,['T', 'Month_sin', 'Month_cos', 'Year',
-                    'B1_inWork', 'B2_inWork', 'B3_inWork' ,'B4_GT41_inWork', 'B4_GT42_inWork', 'B4_inWork',
-                    'B1_Available_N', 'B2_Available_N', 'B3_Available_N', 'B4_Available_N',
-                    'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev', 'Year_Prev',
-                    'B4_GT41_N_Aver_Prev', 'B4_GT42_N_Aver_Prev' ,'B4_PT40_N_Aver_Prev', 'TEC_N_Aver_Prev',
-                    'B1_N_Aver_Prev', 'B2_N_Aver_Prev' ,'B3_N_Aver_Prev', 'B4_N_Aver_Prev',
-                    'B1_Available_N_Prev', 'B2_Available_N_Prev' ,'B3_Available_N_Prev', 'B4_Available_N_Prev']].values
+        X = data.loc[:,['T', 'Month_sin', 'Month_cos',
+                    'B1_Available_Nmin', 'B2_Available_Nmin', 'B3_Available_Nmin', 'B4_Available_Nmin', 'TEC_Available_Nmin',
+                    'B1_Available_Nmax', 'B2_Available_Nmax', 'B3_Available_Nmax', 'B4_Available_Nmax', 'TEC_Available_Nmax',
+                    'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev',
+                    'B1_N_Aver_Prev', 'B2_N_Aver_Prev' ,'B3_N_Aver_Prev', 'B4_N_Aver_Prev', 'TEC_N_Aver_Prev',
+                    'B1_Available_Nmin_Prev', 'B2_Available_Nmin_Prev', 'B3_Available_Nmin_Prev', 'B4_Available_Nmin_Prev', 'TEC_Available_Nmin_Prev',
+                    'B1_Available_Nmax_Prev', 'B2_Available_Nmax_Prev', 'B3_Available_Nmax_Prev', 'B4_Available_Nmax_Prev', 'TEC_Available_Nmax_Prev']].values
 
-        yw = data.loc[:, ['TEC_N_Aver']].values
+        y = data.loc[:, ['TEC_N_Aver']].values
+        
+        y_true_combined = data.loc[:, ['TEC_N_Aver', 'TEC_Available_Nmax',
+                                       'TEC_Available_Nmin']].values
 
     if filepath == 'data/TEC14_Data.csv':
         data['B1_GT11_N_Aver'] = data['B1_GT11_N'] / 24
@@ -238,16 +261,20 @@ def prepare_window_data(filepath, test_start_index):
         data['B1_GT12_inWork'] = np.where(data['B1_GT12_N_Aver'] >= 30, 1, 0)
         data['B2_GT21_inWork'] = np.where(data['B2_GT21_N_Aver'] >= 30, 1, 0)
         data['B2_GT22_inWork'] = np.where(data['B2_GT22_N_Aver'] >= 30, 1, 0)
-        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 50, 1, 0)
-        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 50, 1, 0)
+        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 45, 1, 0)
+        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 45, 1, 0)
 
         data.loc[data['B1_GT11_N_Aver'] < 30, 'B1_GT11_N_Aver'] = 0
         data.loc[data['B1_GT12_N_Aver'] < 30, 'B1_GT12_N_Aver'] = 0
         data.loc[data['B2_GT21_N_Aver'] < 30, 'B2_GT21_N_Aver'] = 0
         data.loc[data['B2_GT22_N_Aver'] < 30, 'B2_GT22_N_Aver'] = 0
-        data.loc[data['B1_N_Aver'] < 50, 'B1_N_Aver'] = 0
-        data.loc[data['B2_N_Aver'] < 50, 'B2_N_Aver'] = 0
-        data.loc[data['TEC_N_Aver'] < 50, 'TEC_N_Aver'] = 0
+        data.loc[data['B1_N_Aver'] < 45, 'B1_N_Aver'] = 0
+        data.loc[data['B2_N_Aver'] < 45, 'B2_N_Aver'] = 0
+        data.loc[data['TEC_N_Aver'] < 45, 'TEC_N_Aver'] = 0
+        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT11_N_Aver')
+        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT12_N_Aver')
+        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT21_N_Aver')
+        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT22_N_Aver')
 
         data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                 data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
@@ -295,8 +322,6 @@ def prepare_window_data(filepath, test_start_index):
                                        'TEC_Available_Nmin']].values
 
     n = test_start_index
-
-    n = test_start_index
     X_train, X_test = X[:n], X[n:]
     y_train, y_test = y[:n], y[n:]
     y_train_comb_raw, y_test_comb_raw = y_true_combined[:n], y_true_combined[n:]
@@ -339,46 +364,39 @@ def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, 
         data['B4_GT42_N_Aver'] = data['B4_GT42_N'] / 24
         data['B4_PT40_N_Aver'] = data['B4_N_Aver'] - data['B4_GT41_N_Aver'] - data['B4_GT42_N_Aver']
 
-        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 125, 1, 0)
-        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 125, 1, 0)
-        data['B3_inWork'] = np.where(data['B3_N_Aver'] > 125, 1, 0)
-        data['B4_GT41_inWork'] = np.where(data['B4_GT41_N_Aver'] > 50, 1, 0)
-        data['B4_GT42_inWork'] = np.where(data['B4_GT42_N_Aver'] > 50, 1, 0)
-        data['B4_inWork'] = np.where(data['B4_N_Aver'] > 40, 1, 0)
+        data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 125, 1, 0)
+        data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 125, 1, 0)
+        data['B3_inWork'] = np.where(data['B3_N_Aver'] >= 125, 1, 0)
+        data['B4_GT41_inWork'] = np.where(data['B4_GT41_N_Aver'] >= 50, 1, 0)
+        data['B4_GT42_inWork'] = np.where(data['B4_GT42_N_Aver'] >= 50, 1, 0)
+        data['B4_inWork'] = np.where(data['B4_N_Aver'] >= 76, 1, 0)
 
         data.loc[data['B1_N_Aver'] < 125, 'B1_N_Aver'] = 0
         data.loc[data['B2_N_Aver'] < 125, 'B2_N_Aver'] = 0
         data.loc[data['B3_N_Aver'] < 125, 'B3_N_Aver'] = 0
-        data.loc[data['B4_GT41_N_Aver'] < 50, 'B4_GT41_N_Aver'] = 0
-        data.loc[data['B4_GT42_N_Aver'] < 50, 'B4_GT42_N_Aver'] = 0
-        data.loc[data['B4_PT40_N_Aver'] < 40, 'B4_PT40_N_Aver'] = 0
-        data.loc[data['TEC_N_Aver'] < 40, 'B1_N_Aver'] = 0
+        data.loc[data['B4_GT41_N_Aver'] <= 50, 'B4_GT41_N_Aver'] = 0
+        data.loc[data['B4_GT42_N_Aver'] <= 50, 'B4_GT42_N_Aver'] = 0
+        data.loc[data['B4_N_Aver'] <= 76, 'B4_N_Aver'] = 0
+        data.loc[data['TEC_N_Aver'] <= 50, 'TEC_N_Aver'] = 0
 
-        data['B1_Available_N'] = data['B1_inWork'] * 250
-        data['B2_Available_N'] = data['B2_inWork'] * 250
-        data['B3_Available_N'] = data['B3_inWork'] * 250
+        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT41_N_Aver')
+        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT42_N_Aver')
 
-        data['B4_Available_N'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
-                    data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['B1_Available_Nmax'] = data['B1_inWork'] * 250
+        data['B2_Available_Nmax'] = data['B2_inWork'] * 250
+        data['B3_Available_Nmax'] = data['B3_inWork'] * 250
+        data['B4_Available_Nmax'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
+                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax'] + \
+                                     data['B4_Available_Nmax']
 
-        data.dropna(inplace=True)
-
-        data.set_index('Date', inplace=True)
-
-        first_pred_value = results[best_window_model_name].flatten()[0]
-        first_test_index = test_idx[0]
-        data.loc[first_test_index, 'TEC_N_Aver_pred'] = first_pred_value
-        data.loc[test_idx[1:15], 'TEC_N_Aver_pred'] = best_step_model[0][:14]
-
-        remaining_indices = test_idx[15:]
-        remaining_preds = results[best_stat_model_name].flatten()[-len(remaining_indices):]
-        data.loc[remaining_indices, 'TEC_N_Aver_pred'] = remaining_preds
-
-        X = data.loc[:,
-            ['T', 'Month_sin','Month_cos', 'Year',
-            'B1_inWork', 'B2_inWork', 'B3_inWork', 'B4_GT41_inWork', 'B4_GT42_inWork', 'B4_inWork',
-            'B1_Available_N', 'B2_Available_N', 'B3_Available_N', 'B4_Available_N', 'TEC_N_Aver_pred']].values
-        y = data.loc[:, [calc_goal+'_N_Aver']].values
+        data['B1_Available_Nmin'] = data['B1_inWork'] * 125
+        data['B2_Available_Nmin'] = data['B2_inWork'] * 125
+        data['B3_Available_Nmin'] = data['B3_inWork'] * 125
+        data['B4_Available_Nmin'] = (data['B4_GT41_inWork'] * 50 + data['B4_GT42_inWork'] * 50 + 26 * (
+                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin'] + \
+                                     data['B4_Available_Nmin']
 
     if filepath == 'data/TEC14_Data.csv':
         data['B1_GT11_N_Aver'] = data['B1_GT11_N'] / 24
@@ -393,16 +411,20 @@ def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, 
         data['B1_GT12_inWork'] = np.where(data['B1_GT12_N_Aver'] >= 30, 1, 0)
         data['B2_GT21_inWork'] = np.where(data['B2_GT21_N_Aver'] >= 30, 1, 0)
         data['B2_GT22_inWork'] = np.where(data['B2_GT22_N_Aver'] >= 30, 1, 0)
-        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 50, 1, 0)
-        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 50, 1, 0)
+        data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 45, 1, 0)
+        data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 45, 1, 0)
 
         data.loc[data['B1_GT11_N_Aver'] < 30, 'B1_GT11_N_Aver'] = 0
         data.loc[data['B1_GT12_N_Aver'] < 30, 'B1_GT12_N_Aver'] = 0
         data.loc[data['B2_GT21_N_Aver'] < 30, 'B2_GT21_N_Aver'] = 0
         data.loc[data['B2_GT22_N_Aver'] < 30, 'B2_GT22_N_Aver'] = 0
-        data.loc[data['B1_N_Aver'] < 50, 'B1_N_Aver'] = 0
-        data.loc[data['B2_N_Aver'] < 50, 'B2_N_Aver'] = 0
-        data.loc[data['TEC_N_Aver'] < 50, 'TEC_N_Aver'] = 0
+        data.loc[data['B1_N_Aver'] < 45, 'B1_N_Aver'] = 0
+        data.loc[data['B2_N_Aver'] < 45, 'B2_N_Aver'] = 0
+        data.loc[data['TEC_N_Aver'] < 45, 'TEC_N_Aver'] = 0
+        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT11_N_Aver')
+        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT12_N_Aver')
+        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT21_N_Aver')
+        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT22_N_Aver')
 
         data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                     data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
@@ -416,27 +438,29 @@ def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, 
                     data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
         data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin']
 
-        data.dropna(inplace=True)
+    data.dropna(inplace=True)
 
-        data.set_index('Date', inplace=True)
+    data.set_index('Date', inplace=True)
 
-        first_pred_value = results[best_window_model_name].flatten()[0]
-        first_test_index = test_idx[0]
-        data.loc[first_test_index, 'TEC_N_Aver_pred'] = first_pred_value
-        data.loc[test_idx[1:15], 'TEC_N_Aver_pred'] = best_step_model[0][:14]
+    first_pred_value = results[best_window_model_name].flatten()[0]
+    first_test_index = test_idx[0]
+    data.loc[first_test_index, 'TEC_N_Aver_pred'] = first_pred_value
+    data.loc[test_idx[1:15], 'TEC_N_Aver_pred'] = best_step_model[0][:14]
 
-        remaining_indices = test_idx[15:]
-        remaining_preds = results[best_stat_model_name].flatten()[-len(remaining_indices):]
-        data.loc[remaining_indices, 'TEC_N_Aver_pred'] = remaining_preds
+    remaining_indices = test_idx[15:]
+    remaining_preds = results[best_stat_model_name].flatten()[-len(remaining_indices):]
+    data.loc[remaining_indices, 'TEC_N_Aver_pred'] = remaining_preds
 
-        X = data.loc[:,
-            ['T', 'Month_sin', 'Month_cos',
-             calc_goal + '_Available_Nmax', calc_goal + '_Available_Nmax',
-             'TEC_N_Aver_pred']].values
-        y = data.loc[:, [calc_goal + '_N_Aver']].values
+    features = ['T', 'Month_sin', 'Month_cos', 'TEC_N_Aver_pred']
+    prefixes = goal_mapping[filepath]
+    for prefix in prefixes:
+        features.append(f'{prefix}_Available_Nmax')
+        features.append(f'{prefix}_Available_Nmin')
+    X = data.loc[:, features].values
+    y = data.loc[:, [calc_goal+'_N_Aver']].values
 
-        y_true_combined = data.loc[:, [calc_goal + '_N_Aver', calc_goal + '_Available_Nmax',
-                                       calc_goal + '_Available_Nmin']].values
+    y_true_combined = data.loc[:, [calc_goal + '_N_Aver', calc_goal + '_Available_Nmax',
+                                   calc_goal + '_Available_Nmin']].values
 
     n = test_start_index
     X_train, X_test = X[:n], X[n:]
@@ -484,37 +508,39 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data['B4_GT42_N_Aver'] = data['B4_GT42_N'] / 24
         data['B4_PT40_N_Aver'] = data['B4_N_Aver'] - data['B4_GT41_N_Aver'] - data['B4_GT42_N_Aver']
 
-        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 125, 1, 0)
-        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 125, 1, 0)
-        data['B3_inWork'] = np.where(data['B3_N_Aver'] > 125, 1, 0)
-        data['B4_GT41_inWork'] = np.where(data['B4_GT41_N_Aver'] > 50, 1, 0)
-        data['B4_GT42_inWork'] = np.where(data['B4_GT42_N_Aver'] > 50, 1, 0)
-        data['B4_inWork'] = np.where(data['B4_N_Aver'] > 40, 1, 0)
+        data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 125, 1, 0)
+        data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 125, 1, 0)
+        data['B3_inWork'] = np.where(data['B3_N_Aver'] >= 125, 1, 0)
+        data['B4_GT41_inWork'] = np.where(data['B4_GT41_N_Aver'] >= 50, 1, 0)
+        data['B4_GT42_inWork'] = np.where(data['B4_GT42_N_Aver'] >= 50, 1, 0)
+        data['B4_inWork'] = np.where(data['B4_N_Aver'] >= 76, 1, 0)
 
         data.loc[data['B1_N_Aver'] < 125, 'B1_N_Aver'] = 0
         data.loc[data['B2_N_Aver'] < 125, 'B2_N_Aver'] = 0
         data.loc[data['B3_N_Aver'] < 125, 'B3_N_Aver'] = 0
-        data.loc[data['B4_GT41_N_Aver'] < 50, 'B4_GT41_N_Aver'] = 0
-        data.loc[data['B4_GT42_N_Aver'] < 50, 'B4_GT42_N_Aver'] = 0
-        data.loc[data['B4_PT40_N_Aver'] < 40, 'B4_PT40_N_Aver'] = 0
-        data.loc[data['TEC_N_Aver'] < 40, 'B1_N_Aver'] = 0
+        data.loc[data['B4_GT41_N_Aver'] <= 50, 'B4_GT41_N_Aver'] = 0
+        data.loc[data['B4_GT42_N_Aver'] <= 50, 'B4_GT42_N_Aver'] = 0
+        data.loc[data['B4_N_Aver'] <= 76, 'B4_N_Aver'] = 0
+        data.loc[data['TEC_N_Aver'] <= 50, 'TEC_N_Aver'] = 0
 
-        #data = data.drop(data[(data['B1_N_Aver'] < 125) & (data['B1_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B2_N_Aver'] < 125) & (data['B2_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B3_N_Aver'] < 125) & (data['B3_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_GT41_N_Aver'] < 50) & (data['B4_GT41_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_GT42_N_Aver'] < 50) & (data['B4_GT42_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_PT40_N_Aver'] < 40) & (data['B4_PT40_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['TEC_N_Aver'] == 0)].index)
+        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT41_N_Aver')
+        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT42_N_Aver')
 
-        data['B1_Available_N'] = data['B1_inWork'] * 250
-        data['B2_Available_N'] = data['B2_inWork'] * 250
-        data['B3_Available_N'] = data['B3_inWork'] * 250
-        # data['B4_Available_N'] = np.where(data['T'] < -2,
-        #    (data['B4_GT41_inWork'] * 160 + data['B4_GT42_inWork'] * 160 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])),
-        #    (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])))
-        data['B4_Available_N'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
-                    data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['B1_Available_Nmax'] = data['B1_inWork'] * 250
+        data['B2_Available_Nmax'] = data['B2_inWork'] * 250
+        data['B3_Available_Nmax'] = data['B3_inWork'] * 250
+        data['B4_Available_Nmax'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
+                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax'] + \
+                                     data['B4_Available_Nmax']
+
+        data['B1_Available_Nmin'] = data['B1_inWork'] * 125
+        data['B2_Available_Nmin'] = data['B2_inWork'] * 125
+        data['B3_Available_Nmin'] = data['B3_inWork'] * 125
+        data['B4_Available_Nmin'] = (data['B4_GT41_inWork'] * 50 + data['B4_GT42_inWork'] * 50 + 26 * (
+                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin'] + \
+                                     data['B4_Available_Nmin']
 
         data.dropna(inplace=True)
 
@@ -541,24 +567,17 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data['B2_N_Aver_Prev'] = data['B2_N_Aver'].shift(1)
         data['B3_N_Aver_Prev'] = data['B3_N_Aver'].shift(1)
         data['B4_N_Aver_Prev'] = data['B4_N_Aver'].shift(1)
-        data['B1_Available_N_Prev'] = data['B1_Available_N'].shift(1)
-        data['B2_Available_N_Prev'] = data['B2_Available_N'].shift(1)
-        data['B3_Available_N_Prev'] = data['B3_Available_N'].shift(1)
-        data['B4_Available_N_Prev'] = data['B4_Available_N'].shift(1)
+        data['B1_Available_Nmin_Prev'] = data['B1_Available_Nmin'].shift(1)
+        data['B2_Available_Nmin_Prev'] = data['B2_Available_Nmin'].shift(1)
+        data['B3_Available_Nmin_Prev'] = data['B3_Available_Nmin'].shift(1)
+        data['B4_Available_Nmin_Prev'] = data['B4_Available_Nmin'].shift(1)
+        data['TEC_Available_Nmin_Prev'] = data['TEC_Available_Nmin'].shift(1)
+        data['B1_Available_Nmax_Prev'] = data['B1_Available_Nmax'].shift(1)
+        data['B2_Available_Nmax_Prev'] = data['B2_Available_Nmax'].shift(1)
+        data['B3_Available_Nmax_Prev'] = data['B3_Available_Nmax'].shift(1)
+        data['B4_Available_Nmax_Prev'] = data['B4_Available_Nmax'].shift(1)
+        data['TEC_Available_Nmax_Prev'] = data['TEC_Available_Nmax'].shift(1)
         data['TEC_N_Aver_pred_Prev'] = data['TEC_N_Aver_pred'].shift(1)
-
-        data.dropna(inplace=True)
-
-        Xw = data.loc[:,
-            ['T', 'Month_sin', 'Month_cos', 'Year',
-             'B1_inWork', 'B2_inWork', 'B3_inWork', 'B4_GT41_inWork', 'B4_GT42_inWork', 'B4_inWork',
-             'B1_Available_N', 'B2_Available_N', 'B3_Available_N', 'B4_Available_N', 'TEC_N_Aver_pred',
-             'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev', 'Year_Prev',
-             'B4_GT41_N_Aver_Prev', 'B4_GT42_N_Aver_Prev', 'B4_PT40_N_Aver_Prev', 'B1_N_Aver_Prev', 'B2_N_Aver_Prev', 'B3_N_Aver_Prev', 'B4_N_Aver_Prev',
-             'B1_Available_N_Prev', 'B2_Available_N_Prev', 'B3_Available_N_Prev', 'B4_Available_N_Prev', 'TEC_N_Aver_pred_Prev',
-
-             ]].values
-        yw = data.loc[:, [calc_goal+'_N_Aver']].values
 
     if filepath == 'data/TEC14_Data.csv':
         data['B1_GT11_N_Aver'] = data['B1_GT11_N'] / 24
@@ -573,16 +592,20 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data['B1_GT12_inWork'] = np.where(data['B1_GT12_N_Aver'] >= 30, 1, 0)
         data['B2_GT21_inWork'] = np.where(data['B2_GT21_N_Aver'] >= 30, 1, 0)
         data['B2_GT22_inWork'] = np.where(data['B2_GT22_N_Aver'] >= 30, 1, 0)
-        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 50, 1, 0)
-        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 50, 1, 0)
+        data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 45, 1, 0)
+        data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 45, 1, 0)
 
         data.loc[data['B1_GT11_N_Aver'] < 30, 'B1_GT11_N_Aver'] = 0
         data.loc[data['B1_GT12_N_Aver'] < 30, 'B1_GT12_N_Aver'] = 0
         data.loc[data['B2_GT21_N_Aver'] < 30, 'B2_GT21_N_Aver'] = 0
         data.loc[data['B2_GT22_N_Aver'] < 30, 'B2_GT22_N_Aver'] = 0
-        data.loc[data['B1_N_Aver'] < 50, 'B1_N_Aver'] = 0
-        data.loc[data['B2_N_Aver'] < 50, 'B2_N_Aver'] = 0
-        data.loc[data['TEC_N_Aver'] < 50, 'TEC_N_Aver'] = 0
+        data.loc[data['B1_N_Aver'] < 45, 'B1_N_Aver'] = 0
+        data.loc[data['B2_N_Aver'] < 45, 'B2_N_Aver'] = 0
+        data.loc[data['TEC_N_Aver'] < 45, 'TEC_N_Aver'] = 0
+        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT11_N_Aver')
+        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT12_N_Aver')
+        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT21_N_Aver')
+        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT22_N_Aver')
 
         data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                     data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
@@ -623,25 +646,21 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data['TEC_Available_Nmin_Prev'] = data['TEC_Available_Nmin'].shift(1)
         data['TEC_N_Aver_pred_Prev'] = data['TEC_N_Aver_pred'].shift(1)
 
-        data.dropna(inplace=True)
+    data.dropna(inplace=True)
 
-        X = data.loc[:,
-             ['T', 'Month_sin', 'Month_cos',
-              calc_goal + '_Available_Nmax',
-              calc_goal + '_Available_Nmin',
-              'TEC_Available_Nmin', 'TEC_Available_Nmax',
-              'TEC_N_Aver_pred',
-              'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev',
-              calc_goal + '_N_Aver_Prev',
-              calc_goal + '_Available_Nmax_Prev',
-              calc_goal + '_Available_Nmin_Prev',
-              'TEC_Available_Nmin_Prev', 'TEC_Available_Nmax_Prev',
-              'TEC_N_Aver_pred_Prev',
-              ]].values
-        y = data.loc[:, [calc_goal + '_N_Aver']].values
+    features = ['T', 'Month_sin', 'Month_cos', 'TEC_N_Aver_pred', 'TEC_N_Aver_pred',
+     'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev','TEC_N_Aver_pred_Prev']
+    prefixes = goal_mapping[filepath]
+    for prefix in prefixes:
+        features.append(f'{prefix}_Available_Nmax')
+        features.append(f'{prefix}_Available_Nmin')
+        features.append(f'{prefix}_Available_Nmax_Prev')
+        features.append(f'{prefix}_Available_Nmin_Prev')
+    X = data.loc[:, features].values
+    y = data.loc[:, [calc_goal+'_N_Aver']].values
 
-        y_true_combined = data.loc[:, [calc_goal + '_N_Aver', calc_goal + '_Available_Nmax',
-                                       calc_goal + '_Available_Nmin']].values
+    y_true_combined = data.loc[:, [calc_goal + '_N_Aver', calc_goal + '_Available_Nmax',
+                                   calc_goal + '_Available_Nmin']].values
 
     n = test_start_index
     X_train, X_test = X[:n], X[n:]
@@ -690,30 +709,39 @@ def prepare_step_data(filepath, test_start_index, n_out):
         data['B4_GT42_N_Aver'] = data['B4_GT42_N'] / 24
         data['B4_PT40_N_Aver'] = data['B4_N_Aver'] - data['B4_GT41_N_Aver'] - data['B4_GT42_N_Aver']
 
-        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 125, 1, 0)
-        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 125, 1, 0)
-        data['B3_inWork'] = np.where(data['B3_N_Aver'] > 125, 1, 0)
-        data['B4_GT41_inWork'] = np.where(data['B4_GT41_N_Aver'] > 50, 1, 0)
-        data['B4_GT42_inWork'] = np.where(data['B4_GT42_N_Aver'] > 50, 1, 0)
-        data['B4_inWork'] = np.where(data['B4_N_Aver'] > 40, 1, 0)
+        data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 125, 1, 0)
+        data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 125, 1, 0)
+        data['B3_inWork'] = np.where(data['B3_N_Aver'] >= 125, 1, 0)
+        data['B4_GT41_inWork'] = np.where(data['B4_GT41_N_Aver'] >= 50, 1, 0)
+        data['B4_GT42_inWork'] = np.where(data['B4_GT42_N_Aver'] >= 50, 1, 0)
+        data['B4_inWork'] = np.where(data['B4_N_Aver'] >= 76, 1, 0)
 
         data.loc[data['B1_N_Aver'] < 125, 'B1_N_Aver'] = 0
         data.loc[data['B2_N_Aver'] < 125, 'B2_N_Aver'] = 0
         data.loc[data['B3_N_Aver'] < 125, 'B3_N_Aver'] = 0
-        data.loc[data['B4_GT41_N_Aver'] < 50, 'B4_GT41_N_Aver'] = 0
-        data.loc[data['B4_GT42_N_Aver'] < 50, 'B4_GT42_N_Aver'] = 0
-        data.loc[data['B4_PT40_N_Aver'] < 40, 'B4_PT40_N_Aver'] = 0
-        data.loc[data['TEC_N_Aver'] < 40, 'B1_N_Aver'] = 0
+        data.loc[data['B4_GT41_N_Aver'] <= 50, 'B4_GT41_N_Aver'] = 0
+        data.loc[data['B4_GT42_N_Aver'] <= 50, 'B4_GT42_N_Aver'] = 0
+        data.loc[data['B4_N_Aver'] <= 76, 'B4_N_Aver'] = 0
+        data.loc[data['TEC_N_Aver'] <= 50, 'TEC_N_Aver'] = 0
 
+        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT41_N_Aver')
+        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT42_N_Aver')
 
-        data['B1_Available_N'] = data['B1_inWork'] * 250
-        data['B2_Available_N'] = data['B2_inWork'] * 250
-        data['B3_Available_N'] = data['B3_inWork'] * 250
-        # data['B4_Available_N'] = np.where(data['T'] < -2,
-        #    (data['B4_GT41_inWork'] * 160 + data['B4_GT42_inWork'] * 160 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])),
-        #    (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])))
-        data['B4_Available_N'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
+        data['B1_Available_Nmax'] = data['B1_inWork'] * 250
+        data['B2_Available_Nmax'] = data['B2_inWork'] * 250
+        data['B3_Available_Nmax'] = data['B3_inWork'] * 250
+        data['B4_Available_Nmax'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
                 data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax'] + \
+                                     data['B4_Available_Nmax']
+
+        data['B1_Available_Nmin'] = data['B1_inWork'] * 125
+        data['B2_Available_Nmin'] = data['B2_inWork'] * 125
+        data['B3_Available_Nmin'] = data['B3_inWork'] * 125
+        data['B4_Available_Nmin'] = (data['B4_GT41_inWork'] * 50 + data['B4_GT42_inWork'] * 50 + 26 * (
+                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin'] + \
+                                     data['B4_Available_Nmin']
 
         data['T_Prev'] = data['T'].shift(1)
         data['Month_sin_Prev'] = data['Month_sin'].shift(1)
@@ -737,10 +765,6 @@ def prepare_step_data(filepath, test_start_index, n_out):
 
         data.set_index('Date', inplace=True)
 
-        base_features = ['T', 'Month_sin', 'Month_cos',
-                         'B1_Available_N', 'B2_Available_N', 'B3_Available_N', 'B4_Available_N',
-                         'T_Prev', 'TEC_N_Aver_Prev']
-
     if filepath == 'data/TEC14_Data.csv':
         data['B1_GT11_N_Aver'] = data['B1_GT11_N'] / 24
         data['B1_GT12_N_Aver'] = data['B1_GT12_N'] / 24
@@ -761,9 +785,13 @@ def prepare_step_data(filepath, test_start_index, n_out):
         data.loc[data['B1_GT12_N_Aver'] < 30, 'B1_GT12_N_Aver'] = 0
         data.loc[data['B2_GT21_N_Aver'] < 30, 'B2_GT21_N_Aver'] = 0
         data.loc[data['B2_GT22_N_Aver'] < 30, 'B2_GT22_N_Aver'] = 0
-        data.loc[data['B1_N_Aver'] < 50, 'B1_N_Aver'] = 0
-        data.loc[data['B2_N_Aver'] < 50, 'B2_N_Aver'] = 0
-        data.loc[data['TEC_N_Aver'] < 50, 'TEC_N_Aver'] = 0
+        data.loc[data['B1_N_Aver'] < 45, 'B1_N_Aver'] = 0
+        data.loc[data['B2_N_Aver'] < 45, 'B2_N_Aver'] = 0
+        data.loc[data['TEC_N_Aver'] < 45, 'TEC_N_Aver'] = 0
+        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT11_N_Aver')
+        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT12_N_Aver')
+        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT21_N_Aver')
+        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT22_N_Aver')
 
         data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                     data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
@@ -795,14 +823,13 @@ def prepare_step_data(filepath, test_start_index, n_out):
 
         data.set_index('Date', inplace=True)
 
-        base_features = ['T', 'Month_sin', 'Month_cos',
-                         'B1_Available_Nmin', 'B2_Available_Nmin',
-                         'B1_Available_Nmax', 'B2_Available_Nmax',
-                         'TEC_Available_Nmin', 'TEC_Available_Nmax',
-                         'B1_Available_Nmin_Prev', 'B2_Available_Nmin_Prev',
-                         'B1_Available_Nmax_Prev', 'B2_Available_Nmax_Prev',
-                         'TEC_Available_Nmin_Prev', 'TEC_Available_Nmax_Prev',
-                         'T_Prev', 'TEC_N_Aver_Prev' ]
+    base_features = ['T', 'Month_sin', 'Month_cos', 'T_Prev', 'TEC_N_Aver_Prev']
+    prefixes = goal_mapping[filepath]
+    for prefix in prefixes:
+        base_features.append(f'{prefix}_Available_Nmax')
+        base_features.append(f'{prefix}_Available_Nmin')
+        base_features.append(f'{prefix}_Available_Nmax_Prev')
+        base_features.append(f'{prefix}_Available_Nmin_Prev')
 
     df = DataFrame(data)
     cols, names, agg = list(), list(), list()
@@ -822,15 +849,25 @@ def prepare_step_data(filepath, test_start_index, n_out):
             cols.append(df[['B4_GT41_inWork']].shift(-i))
             cols.append(df[['B4_GT42_inWork']].shift(-i))
             cols.append(df[['B4_inWork']].shift(-i))
-            cols.append(df[['B1_Available_N']].shift(-i))
-            cols.append(df[['B2_Available_N']].shift(-i))
-            cols.append(df[['B3_Available_N']].shift(-i))
-            cols.append(df[['B4_Available_N']].shift(-i))
+            cols.append(df[['B1_Available_Nmin']].shift(-i))
+            cols.append(df[['B2_Available_Nmin']].shift(-i))
+            cols.append(df[['B3_Available_Nmin']].shift(-i))
+            cols.append(df[['B4_Available_Nmin']].shift(-i))
+            cols.append(df[['TEC_Available_Nmin']].shift(-i))
+            cols.append(df[['B1_Available_Nmax']].shift(-i))
+            cols.append(df[['B2_Available_Nmax']].shift(-i))
+            cols.append(df[['B3_Available_Nmax']].shift(-i))
+            cols.append(df[['B4_Available_Nmax']].shift(-i))
+            cols.append(df[['TEC_Available_Nmax']].shift(-i))
             names += [f'T_lag{i}', f'Month_sin_lag{i}', f'Month_cos_lag{i}', f'Year_lag{i}',
-                      f'TEC_N_Aver_lag{i}', f'B1_inWork_lag{i}', f'B2_inWork_lag{i}', f'B3_inWork_lag{i}',
+                      f'TEC_N_Aver_lag{i}',
+                      f'B1_inWork_lag{i}', f'B2_inWork_lag{i}', f'B3_inWork_lag{i}',
                       f'B4_GT41_inWork_lag{i}', f'B4_GT42_inWork_lag{i}', f'B4_inWork_lag{i}',
-                      f'B1_Available_N_lag{i}', f'B2_Available_N_lag{i}', f'B3_Available_N_lag{i}',
-                      f'B4_Available_N_lag{i}']
+                      f'B1_Available_Nmin_lag{i}', f'B2_Available_Nmin_lag{i}', f'B3_Available_Nmin_lag{i}',
+                      f'B4_Available_Nmin_lag{i}', f'TEC_Available_Nmin_lag{i}',
+                      f'B1_Available_Nmax_lag{i}', f'B2_Available_Nmax_lag{i}', f'B3_Available_Nmax_lag{i}',
+                      f'B4_Available_Nmax_lag{i}', f'TEC_Available_Nmin_lag{i}',
+                      ]
         if filepath == 'data/TEC14_Data.csv':
             weights = df['sample_weight'].values
             weights_train = weights[:test_start_index]
@@ -852,9 +889,9 @@ def prepare_step_data(filepath, test_start_index, n_out):
             cols.append(df[['B1_Available_Nmax']].shift(-i))
             cols.append(df[['B2_Available_Nmax']].shift(-i))
             cols.append(df[['TEC_Available_Nmax']].shift(-i))
-            names += [f'T_lag{i}', f'Month_sin_lag{i}', f'Month_cos_lag{i}', f'Year_lag{i}',
-                      f'TEC_N_Aver_lag{i}', f'B1_inWork_lag{i}', f'B2_inWork_lag{i}',
-                      f'B1_GT11_inWork{i}', f'B1_GT12_inWork{i}', f'B2_GT21_inWork{i}', f'B2_GT22_inWork{i}',
+            names += [f'T_lag{i}', f'Month_sin_lag{i}', f'Month_cos_lag{i}',f'Year_lag{i}',f'TEC_N_Aver_lag{i}',
+                      f'B1_inWork_lag{i}', f'B2_inWork_lag{i}',
+                      f'B1_GT11_inWork_lag{i}', f'B1_GT12_inWork_lag{i}', f'B2_GT21_inWork_lag{i}', f'B2_GT22_inWork_lag{i}',
                       f'B1_Available_Nmin_lag{i}', f'B2_Available_Nmin_lag{i}', f'TEC_Available_Nmin_lag{i}',
                       f'B1_Available_Nmax_lag{i}', f'B2_Available_Nmax_lag{i}', f'TEC_Available_Nmax_lag{i}',
                       ]
@@ -864,8 +901,9 @@ def prepare_step_data(filepath, test_start_index, n_out):
 
     data_with_lag = pd.concat([data, agg], axis=1)
     data_with_lag.dropna(inplace=True)
+    print('data_with_lag:', data_with_lag.shape)
     return data_with_lag, base_features, weights_train
-def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_window_model_name, best_stat_model_name, best_step_model, test_idx):
+def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_window_model_name, best_stat_model_name, best_step_model, test_idx, calc_goal):
     data = pd.read_csv(filepath, delimiter=';', parse_dates=['Date'], dayfirst=True)
 
     data['TEC_N_Aver_pred'] = data['TEC_N_Aver']
@@ -886,37 +924,39 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
         data['B4_GT42_N_Aver'] = data['B4_GT42_N'] / 24
         data['B4_PT40_N_Aver'] = data['B4_N_Aver'] - data['B4_GT41_N_Aver'] - data['B4_GT42_N_Aver']
 
-        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 125, 1, 0)
-        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 125, 1, 0)
-        data['B3_inWork'] = np.where(data['B3_N_Aver'] > 125, 1, 0)
-        data['B4_GT41_inWork'] = np.where(data['B4_GT41_N_Aver'] > 50, 1, 0)
-        data['B4_GT42_inWork'] = np.where(data['B4_GT42_N_Aver'] > 50, 1, 0)
-        data['B4_inWork'] = np.where(data['B4_N_Aver'] > 40, 1, 0)
+        data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 125, 1, 0)
+        data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 125, 1, 0)
+        data['B3_inWork'] = np.where(data['B3_N_Aver'] >= 125, 1, 0)
+        data['B4_GT41_inWork'] = np.where(data['B4_GT41_N_Aver'] >= 50, 1, 0)
+        data['B4_GT42_inWork'] = np.where(data['B4_GT42_N_Aver'] >= 50, 1, 0)
+        data['B4_inWork'] = np.where(data['B4_N_Aver'] >= 76, 1, 0)
 
         data.loc[data['B1_N_Aver'] < 125, 'B1_N_Aver'] = 0
         data.loc[data['B2_N_Aver'] < 125, 'B2_N_Aver'] = 0
         data.loc[data['B3_N_Aver'] < 125, 'B3_N_Aver'] = 0
-        data.loc[data['B4_GT41_N_Aver'] < 50, 'B4_GT41_N_Aver'] = 0
-        data.loc[data['B4_GT42_N_Aver'] < 50, 'B4_GT42_N_Aver'] = 0
-        data.loc[data['B4_PT40_N_Aver'] < 40, 'B4_PT40_N_Aver'] = 0
-        data.loc[data['TEC_N_Aver'] < 40, 'B1_N_Aver'] = 0
+        data.loc[data['B4_GT41_N_Aver'] <= 50, 'B4_GT41_N_Aver'] = 0
+        data.loc[data['B4_GT42_N_Aver'] <= 50, 'B4_GT42_N_Aver'] = 0
+        data.loc[data['B4_N_Aver'] <= 76, 'B4_N_Aver'] = 0
+        data.loc[data['TEC_N_Aver'] <= 50, 'TEC_N_Aver'] = 0
 
-        #data = data.drop(data[(data['B1_N_Aver'] < 125) & (data['B1_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B2_N_Aver'] < 125) & (data['B2_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B3_N_Aver'] < 125) & (data['B3_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_GT41_N_Aver'] < 50) & (data['B4_GT41_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_GT42_N_Aver'] < 50) & (data['B4_GT42_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['B4_PT40_N_Aver'] < 40) & (data['B4_PT40_N_Aver'] > 0)].index)
-        #data = data.drop(data[(data['TEC_N_Aver'] == 0)].index)
+        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT41_N_Aver')
+        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT42_N_Aver')
 
-        data['B1_Available_N'] = data['B1_inWork'] * 250
-        data['B2_Available_N'] = data['B2_inWork'] * 250
-        data['B3_Available_N'] = data['B3_inWork'] * 250
-        # data['B4_Available_N'] = np.where(data['T'] < -2,
-        #    (data['B4_GT41_inWork'] * 160 + data['B4_GT42_inWork'] * 160 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])),
-        #    (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 *(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])))
-        data['B4_Available_N'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
+        data['B1_Available_Nmax'] = data['B1_inWork'] * 250
+        data['B2_Available_Nmax'] = data['B2_inWork'] * 250
+        data['B3_Available_Nmax'] = data['B3_inWork'] * 250
+        data['B4_Available_Nmax'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
                 data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax'] + \
+                                     data['B4_Available_Nmax']
+
+        data['B1_Available_Nmin'] = data['B1_inWork'] * 125
+        data['B2_Available_Nmin'] = data['B2_inWork'] * 125
+        data['B3_Available_Nmin'] = data['B3_inWork'] * 125
+        data['B4_Available_Nmin'] = (data['B4_GT41_inWork'] * 50 + data['B4_GT42_inWork'] * 50 + 26 * (
+                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin'] + \
+                                     data['B4_Available_Nmin']
 
         is_half_block = (data['B4_GT41_inWork'] + data['B4_GT42_inWork'] == 1)
         data['sample_weight'] = np.where(is_half_block, 2.0, 1.0)
@@ -945,16 +985,18 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
         data['B2_N_Aver_Prev'] = data['B2_N_Aver'].shift(1)
         data['B3_N_Aver_Prev'] = data['B3_N_Aver'].shift(1)
         data['B4_N_Aver_Prev'] = data['B4_N_Aver'].shift(1)
-        data['B1_Available_N_Prev'] = data['B1_Available_N'].shift(1)
-        data['B2_Available_N_Prev'] = data['B2_Available_N'].shift(1)
-        data['B3_Available_N_Prev'] = data['B3_Available_N'].shift(1)
-        data['B4_Available_N_Prev'] = data['B4_Available_N'].shift(1)
+        data['B1_Available_Nmin_Prev'] = data['B1_Available_Nmin'].shift(1)
+        data['B2_Available_Nmin_Prev'] = data['B2_Available_Nmin'].shift(1)
+        data['B3_Available_Nmin_Prev'] = data['B3_Available_Nmin'].shift(1)
+        data['B4_Available_Nmin_Prev'] = data['B4_Available_Nmin'].shift(1)
+        data['TEC_Available_Nmin_Prev'] = data['TEC_Available_Nmin'].shift(1)
+        data['B1_Available_Nmax_Prev'] = data['B1_Available_Nmax'].shift(1)
+        data['B2_Available_Nmax_Prev'] = data['B2_Available_Nmax'].shift(1)
+        data['B3_Available_Nmax_Prev'] = data['B3_Available_Nmax'].shift(1)
+        data['B4_Available_Nmax_Prev'] = data['B4_Available_Nmax'].shift(1)
+        data['TEC_Available_Nmax_Prev'] = data['TEC_Available_Nmax'].shift(1)
         data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
 
-        base_features = ['T', 'Month_sin', 'Month_cos', 'TEC_N_Aver_pred', 'B4_N_Aver_Prev',
-                         'B1_inWork', 'B2_inWork', 'B3_inWork', 'B4_GT41_inWork', 'B4_GT42_inWork', 'B4_inWork',
-                         'B1_Available_N', 'B2_Available_N', 'B3_Available_N', 'B4_Available_N',
-                         'T_Prev', 'TEC_N_Aver_Prev']
     if filepath == 'data/TEC14_Data.csv':
         data['B1_GT11_N_Aver'] = data['B1_GT11_N'] / 24
         data['B1_GT12_N_Aver'] = data['B1_GT12_N'] / 24
@@ -975,9 +1017,13 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
         data.loc[data['B1_GT12_N_Aver'] < 30, 'B1_GT12_N_Aver'] = 0
         data.loc[data['B2_GT21_N_Aver'] < 30, 'B2_GT21_N_Aver'] = 0
         data.loc[data['B2_GT22_N_Aver'] < 30, 'B2_GT22_N_Aver'] = 0
-        data.loc[data['B1_N_Aver'] < 50, 'B1_N_Aver'] = 0
-        data.loc[data['B2_N_Aver'] < 50, 'B2_N_Aver'] = 0
-        data.loc[data['TEC_N_Aver'] < 50, 'TEC_N_Aver'] = 0
+        data.loc[data['B1_N_Aver'] < 45, 'B1_N_Aver'] = 0
+        data.loc[data['B2_N_Aver'] < 45, 'B2_N_Aver'] = 0
+        data.loc[data['TEC_N_Aver'] < 45, 'TEC_N_Aver'] = 0
+        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT11_N_Aver')
+        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT12_N_Aver')
+        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT21_N_Aver')
+        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT22_N_Aver')
 
         data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                     data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
@@ -1020,12 +1066,15 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
         data['TEC_Available_Nmax_Prev'] = data['TEC_Available_Nmax'].shift(1)
         data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
 
-        base_features = ['T', 'Month_sin', 'Month_cos',
-                         'B1_Available_Nmin_Prev', 'B2_Available_Nmin_Prev','TEC_Available_Nmin_Prev',
-                         'B1_Available_Nmax_Prev', 'B2_Available_Nmax_Prev','TEC_Available_Nmax_Prev',
-                         'B1_Available_Nmin', 'B2_Available_Nmin', 'TEC_Available_Nmin',
-                         'B1_Available_Nmax', 'B2_Available_Nmax', 'TEC_Available_Nmax',
-                         'T_Prev', 'TEC_N_Aver_Prev']
+    base_features = ['T', 'Month_sin', 'Month_cos', 'T_Prev', 'TEC_N_Aver_Prev']
+    prefixes = goal_mapping[filepath]
+    for prefix in prefixes:
+        base_features.append(f'{prefix}_Available_Nmax')
+        base_features.append(f'{prefix}_Available_Nmin')
+        base_features.append(f'{prefix}_Available_Nmax_Prev')
+        base_features.append(f'{prefix}_Available_Nmin_Prev')
+        base_features.append(f'{prefix}_N_Aver_Prev')
+        base_features.append(f'{prefix}_N_Aver_Prev')
 
     df = DataFrame(data)
 
@@ -1046,10 +1095,16 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
             cols.append(df[['B4_GT41_inWork']].shift(-i))
             cols.append(df[['B4_GT42_inWork']].shift(-i))
             cols.append(df[['B4_inWork']].shift(-i))
-            cols.append(df[['B1_Available_N']].shift(-i))
-            cols.append(df[['B2_Available_N']].shift(-i))
-            cols.append(df[['B3_Available_N']].shift(-i))
-            cols.append(df[['B4_Available_N']].shift(-i))
+            cols.append(df[['B1_Available_Nmin']].shift(-i))
+            cols.append(df[['B2_Available_Nmin']].shift(-i))
+            cols.append(df[['B3_Available_Nmin']].shift(-i))
+            cols.append(df[['B4_Available_Nmin']].shift(-i))
+            cols.append(df[['TEC_Available_Nmin']].shift(-i))
+            cols.append(df[['B1_Available_Nmax']].shift(-i))
+            cols.append(df[['B2_Available_Nmax']].shift(-i))
+            cols.append(df[['B3_Available_Nmax']].shift(-i))
+            cols.append(df[['B4_Available_Nmax']].shift(-i))
+            cols.append(df[['TEC_Available_Nmax']].shift(-i))
             cols.append(df[['B1_N_Aver']].shift(-i))
             cols.append(df[['B2_N_Aver']].shift(-i))
             cols.append(df[['B3_N_Aver']].shift(-i))
@@ -1057,8 +1112,10 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
             names += [f'T_lag{i}', f'Month_sin_lag{i}', f'Month_cos_lag{i}', f'Year_lag{i}',
                       f'TEC_N_Aver_pred_lag{i}', f'B1_inWork_lag{i}', f'B2_inWork_lag{i}', f'B3_inWork_lag{i}',
                       f'B4_GT41_inWork_lag{i}', f'B4_GT42_inWork_lag{i}', f'B4_inWork_lag{i}',
-                      f'B1_Available_N_lag{i}', f'B2_Available_N_lag{i}', f'B3_Available_N_lag{i}',
-                      f'B4_Available_N_lag{i}',
+                      f'B1_Available_Nmin_lag{i}', f'B2_Available_Nmin_lag{i}', f'B3_Available_Nmin_lag{i}',
+                      f'B4_Available_Nmin_lag{i}', f'TEC_Available_Nmin_lag{i}',
+                      f'B1_Available_Nmax_lag{i}', f'B2_Available_Nmax_lag{i}', f'B3_Available_Nmax_lag{i}',
+                      f'B4_Available_Nmax_lag{i}', f'TEC_Available_Nmax_lag{i}',
                       f'B1_N_Aver_lag{i}', f'B2_N_Aver_lag{i}', f'B3_N_Aver_lag{i}', f'B4_N_Aver_lag{i}']
 
         if filepath == 'data/TEC14_Data.csv':
@@ -1097,70 +1154,66 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
     return data_with_lag, base_features, weights_train
 
 def prepare_direct_data(filepath, data_with_lag, step, base_features, train_size):
-    if filepath == 'data/TEC22_Data.csv':
-        step_features = base_features + [
-            f'T_lag{step}',
-            f'B1_inWork_lag{step}', f'B2_inWork_lag{step}', f'B3_inWork_lag{step}',
-            f'B4_GT41_inWork_lag{step}', f'B4_GT42_inWork_lag{step}', f'B4_inWork_lag{step}',
-            f'B1_Available_Nmin_lag{step}', f'B2_Available_Nmin_lag{step}',
-            f'B3_Available_N_lag{step}', f'B4_Available_N_lag{step}'
-        ]
-    if filepath == 'data/TEC14_Data.csv':
-        step_features = base_features + [
-            f'T_lag{step}',
-            f'B1_Available_Nmin_lag{step}', f'B2_Available_Nmin_lag{step}',f'TEC_Available_Nmin_lag{step}',
-            f'B1_Available_Nmax_lag{step}', f'B2_Available_Nmax_lag{step}', f'TEC_Available_Nmax_lag{step}',
-        ]
+    step_features = base_features + [f'T_lag{step}']
+    prefixes = goal_mapping[filepath]
+    for prefix in prefixes:
+        base_features.append(f'{prefix}_Available_Nmax_lag{step}')
+        base_features.append(f'{prefix}_Available_Nmin_lag{step}')
 
     x = data_with_lag[step_features].values
     y = data_with_lag.loc[:, [f'TEC_N_Aver_lag{step}']].values
+    y_true_combined = data_with_lag.loc[:, [f'TEC_N_Aver_lag{step}', f'TEC_Available_Nmax_lag{step}',
+                                   f'TEC_Available_Nmin_lag{step}']].values
 
     X_train_raw, X_test_raw = x[:train_size], x[train_size:]
     y_train_raw, y_test_raw = y[:train_size], y[train_size:]
+    y_train_comb_raw, y_test_comb_raw = y_true_combined[:train_size], y_true_combined[train_size:]
 
     scaler_x = MinMaxScaler()
     X_train_scaled = scaler_x.fit_transform(X_train_raw)
     X_test_scaled = scaler_x.transform(X_test_raw)
 
     scaler_y = MinMaxScaler()
-    y_train_scaled = scaler_y.fit_transform(y_train_raw)
+    scaler_y.fit(y_train_raw)
+    y_train_scaled =scaler_y.transform(y_train_raw)
     y_test_scaled = scaler_y.transform(y_test_raw)
 
+    y_train_s_combined = scale_combined(y_train_comb_raw, scaler_y)
+    y_test_s_combined = scale_combined(y_test_comb_raw, scaler_y)
+
     return (X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled,
-            scaler_y, y_test_raw)
+            scaler_y, y_test_raw, y_train_s_combined, y_test_s_combined)
 def prepare_meta_direct_data(filepath, data_with_lag, step, base_features, train_size, calc_goal):
-    if filepath == 'data/TEC22_Data.csv':
-        step_features = base_features + [
-            f'T_lag{step}',
-            f'B1_inWork_lag{step}', f'B2_inWork_lag{step}', f'B3_inWork_lag{step}',
-            f'B4_GT41_inWork_lag{step}', f'B4_GT42_inWork_lag{step}', f'B4_inWork_lag{step}',
-            f'B1_Available_N_lag{step}', f'B2_Available_N_lag{step}', f'B3_Available_N_lag{step}', f'B4_Available_N_lag{step}',
-            f'TEC_N_Aver_pred_lag{step}'
-        ]
-    if filepath == 'data/TEC14_Data.csv':
-        step_features = base_features + [
-            f'T_lag{step}',
-            f'B1_Available_Nmin_lag{step}', f'B2_Available_Nmin_lag{step}',f'TEC_Available_Nmin_lag{step}',
-            f'B1_Available_Nmax_lag{step}', f'B2_Available_Nmax_lag{step}', f'TEC_Available_Nmax_lag{step}',
-            f'TEC_N_Aver_pred_lag{step}'
-        ]
+
+    step_features = base_features + [f'T_lag{step}', f'TEC_N_Aver_pred_lag{step}']
+    prefixes = goal_mapping[filepath]
+    for prefix in prefixes:
+        base_features.append(f'{prefix}_Available_Nmax_lag{step}')
+        base_features.append(f'{prefix}_Available_Nmin_lag{step}')
 
     x = data_with_lag[step_features].values
     y = data_with_lag.loc[:, [calc_goal + f'_N_Aver_lag{step}']].values
+    y_true_combined = data_with_lag.loc[:, [calc_goal + f'_N_Aver', calc_goal + f'_Available_Nmax',
+                                   calc_goal + f'_Available_Nmin']].values
 
     X_train_raw, X_test_raw = x[:train_size], x[train_size:]
     y_train_raw, y_test_raw = y[:train_size], y[train_size:]
+    y_train_comb_raw, y_test_comb_raw = y_true_combined[:train_size], y_true_combined[train_size:]
 
     scaler_x = MinMaxScaler()
     X_train_scaled = scaler_x.fit_transform(X_train_raw)
     X_test_scaled = scaler_x.transform(X_test_raw)
 
     scaler_y = MinMaxScaler()
-    y_train_scaled = scaler_y.fit_transform(y_train_raw)
+    scaler_y.fit(y_train_raw)
+    y_train_scaled =scaler_y.transform(y_train_raw)
     y_test_scaled = scaler_y.transform(y_test_raw)
 
+    y_train_s_combined = scale_combined(y_train_comb_raw, scaler_y)
+    y_test_s_combined = scale_combined(y_test_comb_raw, scaler_y)
+
     return (X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled,
-            scaler_y, y_test_raw)
+            scaler_y, y_test_raw, y_train_s_combined, y_test_s_combined)
 
 def optuna_cbr_search(trial, X_train, y_train, X_test, y_test, scaler_y):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -1217,10 +1270,31 @@ def optuna_lstm_search(trial, X_train, y_train, X_test, y_test, scaler_y, input_
     ])
     optimizer = Adam(learning_rate=lr)
     model.compile(optimizer=optimizer, loss=custom_loss)
-    model.fit(X_train, y_train_s_combined, validation_data=(X_test, y_test_s_combined), epochs=10, batch_size=32, verbose=0)
+    model.fit(X_train, y_train_s_combined, validation_data=(X_test, y_test_s_combined), epochs=25, batch_size=32, verbose=0, callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_loss')])
     pred_lstm_s = model.predict(X_test)
     y_pred_unscaled = scaler_y.inverse_transform(pred_lstm_s)
     y_test_unscaled = scaler_y.inverse_transform(y_test)
+    mae = metrics.mean_absolute_error(y_pred_unscaled, y_test_unscaled)
+    return mae
+def optuna_mlp_search(trial, X_train, y_train, X_test, y_test, scaler_y, y_train_s_combined, y_test_s_combined):
+
+    n_layers = trial.suggest_int('n_layers', 1, 3)
+    lr = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
+
+    model = Sequential()
+    for i in range(n_layers):
+        units = trial.suggest_int(f'units_l{i}', 16, 128)
+        model.add(Dense(units, activation='relu'))
+
+    model.add(Dense(1))
+    model.compile(optimizer=Adam(learning_rate=lr), loss=custom_loss)
+
+    model.fit(X_train, y_train_s_combined, validation_data=(X_test, y_test_s_combined),
+              epochs=25, batch_size=32, verbose=0, callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_loss')])
+
+    preds = model.predict(X_test)
+    y_pred_unscaled = scaler_y.inverse_transform(preds.reshape(-1, 1))
+    y_test_unscaled = scaler_y.inverse_transform(y_test.reshape(-1, 1))
     mae = metrics.mean_absolute_error(y_pred_unscaled, y_test_unscaled)
     return mae
 

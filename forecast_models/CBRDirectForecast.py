@@ -31,7 +31,7 @@ def train_cbr_direct_multistep(data, checkpoint_dir,checkpoint_unit_type, n_out,
         step = str(i + 1)
         print(f"\n=== Step training {step} ===")
 
-        X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test = prepare_direct_data(data, data_with_lag, step, base_features, train_size)
+        X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test, y_train_s_combined, y_test_s_combined = prepare_direct_data(data, data_with_lag, step, base_features, train_size)
 
         if step in best_params_storage:
             print(f"--- Step {step}: Using saved parameters: {best_params_storage[step]}")
@@ -60,6 +60,7 @@ def train_cbr_direct_multistep(data, checkpoint_dir,checkpoint_unit_type, n_out,
 
         yhat_scaled = model.predict(X_test_scaled)
         yhat = scaler_y.inverse_transform(yhat_scaled.reshape(-1, 1))
+        yhat[yhat < y_test_s_combined[:, 2][:, None]] = 0
         yhat = np.maximum(yhat, 0)
 
         MAE_test = metrics.mean_absolute_error(y_test, yhat)

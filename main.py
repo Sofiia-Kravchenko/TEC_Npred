@@ -1,6 +1,7 @@
 import os
 import warnings
 
+import pandas as pd
 import tensorflow as tf
 import argparse
 
@@ -37,14 +38,16 @@ def main():
     warnings.filterwarnings("ignore")
 
     tec_results, test_idx, best_window_model_name, best_stat_model_name, best_step_model = calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoint_unit_type, n_out, calc_goal, tec_results, test_idx, best_window_model_name, best_stat_model_name, best_step_model)
-    results.update(tec_results)
+    results[calc_goal]=tec_results[best_stat_model_name]
     for calc_goal in args.target_power_unit:
         print(f"--- Prediction for: {calc_goal} ---")
         checkpoint_unit_type = calc_goal
 
         tg_results, test_idx, best_window_model_name, best_stat_model_name, best_step_model = calc_power_generation(data_path, test_start_index, checkpoint_dir, checkpoint_unit_type, n_out, calc_goal, tec_results, test_idx, best_window_model_name, best_stat_model_name, best_step_model)
-    results.update(tg_results)
+    results[calc_goal]=tec_results[best_stat_model_name]
 
+    df_report = pd.DataFrame(results)
+    df_report.to_csv('rez_report.csv', index=False)
 
 if __name__ == "__main__":
     main()
