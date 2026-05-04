@@ -30,7 +30,7 @@ def print_stat_results(results, y_test, calc_goal):
     df_report = df_report.sort_values(by='MAE').reset_index(drop=True)
 
     print(df_report.to_string(index=False, float_format=lambda x: "{:.4f}".format(x)))
-    if calc_goal == 'TEC_N_Aver':
+    if calc_goal == 'TEC':
         df_report.to_csv('Power_Station_model_evaluation_report.csv', index=False)
     else:
         df_report.to_csv(calc_goal+'_model_evaluation_report.csv', index=False)
@@ -42,7 +42,7 @@ def print_stat_results(results, y_test, calc_goal):
     for name, pred in results.items():
         export_df[name] = pred[-min_len:].flatten()
 
-    if calc_goal == 'TEC_N_Aver':
+    if calc_goal == 'TEC':
         export_df.to_excel('Power_Station_final_predictions_comparison.xlsx', index=False)
     else:
         export_df.to_excel(calc_goal+'_final_predictions_comparison.xlsx', index=False)
@@ -67,7 +67,6 @@ def print_stat_results(results, y_test, calc_goal):
         best_stat_model_name = best_model['Model Name']
 
     return best_window_model_name, best_stat_model_name
-
 def print_step_results(lstm_multi_results, cbr_multi_results):
     best_step_model = ''
     print("\n" + "=" * 60)
@@ -81,3 +80,4 @@ def print_step_results(lstm_multi_results, cbr_multi_results):
     if lstm_multi_results.shape[0] < cbr_multi_results[i][0]: best_step_model = 'lstm'
     else: best_step_model = 'CBR'
     return best_step_model
+

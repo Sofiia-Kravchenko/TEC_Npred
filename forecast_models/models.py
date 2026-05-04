@@ -6,7 +6,7 @@ import tensorflow as tf
 
 from catboost import CatBoostRegressor
 from keras.optimizers import Adam
-from keras.src.saving import load_model
+from keras.models import load_model
 from sklearn.ensemble import RandomForestRegressor
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.models import Sequential
@@ -104,7 +104,7 @@ def get_mlp(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_te
     return model, early_stop_callback, current_epochs
 
 def get_rfr(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y):
-    study = optuna.create_study(direction="minimize")
+    study = optuna.create_study(direction="minimize", pruner=optuna.pruners.MedianPruner())
     study.optimize(lambda trial: optuna_rfr_search(trial, X_train_s, y_train_s, X_test_s, y_test_s, scaler_y),
                    n_trials=20)
 

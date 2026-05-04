@@ -10,22 +10,22 @@ from keras.models import load_model
 from keras import Sequential
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 from keras.layers import Dense, LSTM
-from keras.src.optimizers import Adam
+from tensorflow.keras.optimizers import Adam
 from sklearn import metrics
 
 from utils import prepare_step_data, prepare_direct_data, custom_loss
 
 tf.random.set_seed(42)
 
-def train_lstm_direct_multistep(data, checkpoint_dir, n_out, train_size, checkpoint_unit_type):
+def train_lstm_direct_multistep(data, checkpoint_dir, n_out, train_size, calc_goal):
 
     results_list = []
     metrics_list = []
 
     checkpoint_dir = os.path.join(checkpoint_dir, 'multistep/')
     os.makedirs(checkpoint_dir, exist_ok=True)
-    checkpoint_base = os.path.join(checkpoint_dir, f"{checkpoint_unit_type}_LSTM_LAG_model_step_")
-    params_path = os.path.join(checkpoint_dir, f"{checkpoint_unit_type}_best_params.json")
+    checkpoint_base = os.path.join(checkpoint_dir, f"{calc_goal}_LSTM_LAG_model_step_")
+    params_path = os.path.join(checkpoint_dir, f"{calc_goal}_best_params.json")
 
     if os.path.exists(params_path):
         with open(params_path, 'r') as f:
@@ -41,10 +41,10 @@ def train_lstm_direct_multistep(data, checkpoint_dir, n_out, train_size, checkpo
         current_checkpoint = f"{checkpoint_base}{i}.keras"
         print(f"\n=== Step training {step} ===")
 
-        X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test, y_train_s_combined, y_test_s_combined = prepare_direct_data(data, data_with_lag, step, base_features, train_size)
+        x_train_scaled, x_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test, y_train_s_combined, y_test_s_combined, y_test_combined = prepare_direct_data(data, data_with_lag, step, base_features, train_size)
 
-        X_train_scaled = X_train_scaled.reshape((X_train_scaled.shape[0], 1, X_train_scaled.shape[1]))
-        X_test_scaled = X_test_scaled.reshape((X_test_scaled.shape[0], 1, X_test_scaled.shape[1]))
+        x_train_scaled = x_train_scaled.reshape((x_train_scaled.shape[0], 1, x_train_scaled.shape[1]))
+        x_test_scaled = x_test_scaled.reshape((x_test_scaled.shape[0], 1, x_test_scaled.shape[1]))
 
         if os.path.exists(current_checkpoint):
             print(f"--- Step {step}: Checkpoint found. Loading... ---")
@@ -63,13 +63,13 @@ def train_lstm_direct_multistep(data, checkpoint_dir, n_out, train_size, checkpo
                     n_dense = trial.suggest_int('n_dense', 20, 100)
                     lr = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
                     m = Sequential([
-                        LSTM(n_lstm, input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2])),
+                        LSTM(n_lstm, input_shape=(x_train_scaled.shape[1], x_train_scaled.shape[2])),
                         Dense(n_dense, activation='relu'),
                         Dense(1)
                     ])
                     m.compile(loss=custom_loss, optimizer=Adam(learning_rate=lr))
-                    m.fit(X_train_scaled, y_train_s_combined, validation_data=(X_test_scaled, y_test_s_combined), epochs=10, batch_size=32, verbose=0, callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_loss')])
-                    yp = scaler_y.inverse_transform(m.predict(X_test_scaled))
+                    m.fit(x_train_scaled, y_train_s_combined, validation_data=(x_test_scaled, y_test_s_combined), epochs=10, batch_size=32, verbose=0, callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_loss')])
+                    yp = scaler_y.inverse_transform(m.predict(x_test_scaled))
                     mae = metrics.mean_absolute_error(y_test, yp)
                     return mae
 
@@ -81,7 +81,7 @@ def train_lstm_direct_multistep(data, checkpoint_dir, n_out, train_size, checkpo
 
             params = all_steps_params[step_key]
             model = Sequential([
-                LSTM(params['n_lstm'], input_shape=(X_train_scaled.shape[1], X_train_scaled.shape[2])),
+                LSTM(params['n_lstm'], input_shape=(x_train_scaled.shape[1], x_train_scaled.shape[2])),
                 Dense(params['n_dense'], activation='relu'),
                 Dense(1)
             ])
@@ -99,15 +99,18 @@ def train_lstm_direct_multistep(data, checkpoint_dir, n_out, train_size, checkpo
         checkpoint_callback = ModelCheckpoint(filepath=current_checkpoint, save_best_only=True, monitor='val_loss')
         early_stop_callback = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
 
-        model.fit(X_train_scaled, y_train_s_combined,
+        model.fit(x_train_scaled, y_train_s_combined,
                   epochs=current_epochs,
                   batch_size=32,
-                  validation_data=(X_test_scaled, y_test_s_combined),
+                  validation_data=(x_test_scaled, y_test_s_combined),
                   callbacks=[early_stop_callback, checkpoint_callback],
                   verbose=0, shuffle=False)
 
-        yhat = scaler_y.inverse_transform(model.predict(X_test_scaled))
-        yhat[yhat < y_test_s_combined[:, 2][:, None]] = 0
+        yhat_s = model.predict(x_test_scaled)
+        yhat = scaler_y.inverse_transform(yhat_s)
+        yhat[yhat < y_test_combined[:, 2][:, None]] = 0
+        n_max = y_test_combined[:, 1][:, None]
+        yhat = np.where(yhat > n_max, n_max, yhat)
         yhat = np.maximum(yhat, 0)
 
         results_list.append(yhat)
@@ -117,7 +120,7 @@ def train_lstm_direct_multistep(data, checkpoint_dir, n_out, train_size, checkpo
             np.sum(np.abs(y_test - yhat)) / np.sum(np.abs(y_test)) * 100,
             metrics.r2_score(y_test, yhat)
         ])
-
+        print('MAE:', metrics.mean_absolute_error(y_test, yhat))
         del model
         keras_backend.clear_session()
         gc.collect()
