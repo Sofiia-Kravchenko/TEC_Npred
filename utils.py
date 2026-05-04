@@ -11,6 +11,7 @@ from sklearn.preprocessing import MinMaxScaler
 from pandas import DataFrame, concat
 from optuna.integration import CatBoostPruningCallback
 import tensorflow as tf
+import pulp
 
 goal_mapping = {
     "data/TEC22_Data.csv": ["B1", "B2", "B3", "B4", "TEC"],
@@ -51,8 +52,8 @@ def prepare_stat_data(filepath, test_start_index):
         data.loc[data['B4_N_Aver'] <= 76, 'B4_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] <= 50, 'TEC_N_Aver'] = 0
 
-        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT41_N_Aver')
-        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT42_N_Aver')
+        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, data['B4_GT41_N_Aver'])
+        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, data['B4_GT42_N_Aver'])
 
         data['B1_Available_Nmax'] = data['B1_inWork'] * 250
         data['B2_Available_Nmax'] = data['B2_inWork'] * 250
@@ -69,10 +70,8 @@ def prepare_stat_data(filepath, test_start_index):
         data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin']+ data['B4_Available_Nmin']
 
         data.dropna(inplace=True)
-        print(data.shape)
-        data.set_index('Date', inplace=True)
 
-        X = data.loc[:, ['T',  'Month_sin', 'Month_cos',
+        x = data.loc[:, ['T',  'Month_sin', 'Month_cos',
                         'B1_Available_Nmax', 'B2_Available_Nmax', 'B3_Available_Nmax', 'B4_Available_Nmax', 'TEC_Available_Nmax',
                         'B1_Available_Nmin', 'B2_Available_Nmin', 'B3_Available_Nmin', 'B4_Available_Nmin', 'TEC_Available_Nmin']].values
         y = data.loc[:, ['TEC_N_Aver']].values
@@ -103,10 +102,10 @@ def prepare_stat_data(filepath, test_start_index):
         data.loc[data['B1_N_Aver'] < 45, 'B1_N_Aver'] = 0
         data.loc[data['B2_N_Aver'] < 45, 'B2_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] < 45, 'TEC_N_Aver'] = 0
-        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT11_N_Aver')
-        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT12_N_Aver')
-        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT21_N_Aver')
-        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT22_N_Aver')
+        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0,  data['B1_GT11_N_Aver'])
+        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0,  data['B1_GT12_N_Aver'])
+        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT21_N_Aver'])
+        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT22_N_Aver'])
 
         data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                     data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
@@ -121,11 +120,8 @@ def prepare_stat_data(filepath, test_start_index):
         data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin']
 
         data.dropna(inplace=True)
-        print(data.shape)
 
-        data.set_index('Date', inplace=True)
-
-        X = data.loc[:, ['T', 'Month_sin', 'Month_cos',
+        x = data.loc[:, ['T', 'Month_sin', 'Month_cos',
                          'B1_Available_Nmax', 'B2_Available_Nmax',
                          'B1_Available_Nmin', 'B2_Available_Nmin',
                          'TEC_Available_Nmax','TEC_Available_Nmin']].values
@@ -133,17 +129,18 @@ def prepare_stat_data(filepath, test_start_index):
         y_true_combined = data.loc[:, ['TEC_N_Aver', 'TEC_Available_Nmax',
                                        'TEC_Available_Nmin']].values
 
+    data.set_index('Date', inplace=True)
 
     n = test_start_index
-    X_train, X_test = X[:n], X[n:]
+    x_train, x_test = x[:n], x[n:]
     y_train, y_test = y[:n], y[n:]
     y_train_comb_raw, y_test_comb_raw = y_true_combined[:n], y_true_combined[n:]
 
     scaler_x = MinMaxScaler()
     scaler_y = MinMaxScaler()
 
-    X_train_s = scaler_x.fit_transform(X_train)
-    X_test_s = scaler_x.transform(X_test)
+    x_train_s = scaler_x.fit_transform(x_train)
+    x_test_s = scaler_x.transform(x_test)
 
     scaler_y.fit(y_train)
     y_train_s =scaler_y.transform(y_train)
@@ -154,7 +151,7 @@ def prepare_stat_data(filepath, test_start_index):
 
     test_idx = data.index[test_start_index:]
 
-    return X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined
+    return x_train_s, x_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined, y_test_comb_raw
 def prepare_window_data(filepath, test_start_index):
     data = pd.read_csv(filepath, delimiter=';', parse_dates=['Date'], dayfirst=True)
 
@@ -189,8 +186,8 @@ def prepare_window_data(filepath, test_start_index):
         data.loc[data['B4_N_Aver'] <= 76, 'B4_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] <= 50, 'TEC_N_Aver'] = 0
 
-        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT41_N_Aver')
-        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT42_N_Aver')
+        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, data['B4_GT41_N_Aver'])
+        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, data['B4_GT42_N_Aver'])
 
         data['B1_Available_Nmax'] = data['B1_inWork'] * 250
         data['B2_Available_Nmax'] = data['B2_inWork'] * 250
@@ -233,9 +230,7 @@ def prepare_window_data(filepath, test_start_index):
 
         data.dropna(inplace=True)
 
-        data.set_index('Date', inplace=True)
-
-        X = data.loc[:,['T', 'Month_sin', 'Month_cos',
+        x = data.loc[:,['T', 'Month_sin', 'Month_cos',
                     'B1_Available_Nmin', 'B2_Available_Nmin', 'B3_Available_Nmin', 'B4_Available_Nmin', 'TEC_Available_Nmin',
                     'B1_Available_Nmax', 'B2_Available_Nmax', 'B3_Available_Nmax', 'B4_Available_Nmax', 'TEC_Available_Nmax',
                     'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev',
@@ -244,7 +239,7 @@ def prepare_window_data(filepath, test_start_index):
                     'B1_Available_Nmax_Prev', 'B2_Available_Nmax_Prev', 'B3_Available_Nmax_Prev', 'B4_Available_Nmax_Prev', 'TEC_Available_Nmax_Prev']].values
 
         y = data.loc[:, ['TEC_N_Aver']].values
-        
+
         y_true_combined = data.loc[:, ['TEC_N_Aver', 'TEC_Available_Nmax',
                                        'TEC_Available_Nmin']].values
 
@@ -271,10 +266,10 @@ def prepare_window_data(filepath, test_start_index):
         data.loc[data['B1_N_Aver'] < 45, 'B1_N_Aver'] = 0
         data.loc[data['B2_N_Aver'] < 45, 'B2_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] < 45, 'TEC_N_Aver'] = 0
-        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT11_N_Aver')
-        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT12_N_Aver')
-        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT21_N_Aver')
-        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT22_N_Aver')
+        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0,  data['B1_GT11_N_Aver'])
+        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0,  data['B1_GT12_N_Aver'])
+        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT21_N_Aver'])
+        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT22_N_Aver'])
 
         data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                 data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
@@ -304,9 +299,7 @@ def prepare_window_data(filepath, test_start_index):
 
         data.dropna(inplace=True)
 
-        data.set_index('Date', inplace=True)
-
-        X = data.loc[:, ['T', 'Month_sin', 'Month_cos',
+        x = data.loc[:, ['T', 'Month_sin', 'Month_cos',
                          'B1_Available_Nmax', 'B2_Available_Nmax',
                          'B1_Available_Nmin', 'B2_Available_Nmin',
                          'TEC_Available_Nmax', 'TEC_Available_Nmin',
@@ -321,16 +314,18 @@ def prepare_window_data(filepath, test_start_index):
         y_true_combined = data.loc[:, ['TEC_N_Aver', 'TEC_Available_Nmax',
                                        'TEC_Available_Nmin']].values
 
+    data.set_index('Date', inplace=True)
+
     n = test_start_index
-    X_train, X_test = X[:n], X[n:]
+    x_train, x_test = x[:n], x[n:]
     y_train, y_test = y[:n], y[n:]
     y_train_comb_raw, y_test_comb_raw = y_true_combined[:n], y_true_combined[n:]
 
     scaler_x = MinMaxScaler()
     scaler_y = MinMaxScaler()
 
-    X_train_s = scaler_x.fit_transform(X_train)
-    X_test_s = scaler_x.transform(X_test)
+    x_train_s = scaler_x.fit_transform(x_train)
+    x_test_s = scaler_x.transform(x_test)
 
     scaler_y.fit(y_train)
     y_train_s =scaler_y.transform(y_train)
@@ -341,7 +336,7 @@ def prepare_window_data(filepath, test_start_index):
 
     test_idx = data.index[test_start_index:]
 
-    return X_train_s, X_test_s, y_train_s, y_test_s, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined
+    return x_train_s, x_test_s, y_train_s, y_test_s, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined, y_test_comb_raw
 
 def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model):
     data = pd.read_csv(filepath, delimiter=';', parse_dates=['Date'], dayfirst=True)
@@ -379,8 +374,8 @@ def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, 
         data.loc[data['B4_N_Aver'] <= 76, 'B4_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] <= 50, 'TEC_N_Aver'] = 0
 
-        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT41_N_Aver')
-        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT42_N_Aver')
+        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, data['B4_GT41_N_Aver'])
+        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, data['B4_GT42_N_Aver'])
 
         data['B1_Available_Nmax'] = data['B1_inWork'] * 250
         data['B2_Available_Nmax'] = data['B2_inWork'] * 250
@@ -421,10 +416,10 @@ def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, 
         data.loc[data['B1_N_Aver'] < 45, 'B1_N_Aver'] = 0
         data.loc[data['B2_N_Aver'] < 45, 'B2_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] < 45, 'TEC_N_Aver'] = 0
-        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT11_N_Aver')
-        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT12_N_Aver')
-        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT21_N_Aver')
-        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT22_N_Aver')
+        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0,  data['B1_GT11_N_Aver'])
+        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0,  data['B1_GT12_N_Aver'])
+        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT21_N_Aver'])
+        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT22_N_Aver'])
 
         data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                     data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
@@ -456,22 +451,22 @@ def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, 
     for prefix in prefixes:
         features.append(f'{prefix}_Available_Nmax')
         features.append(f'{prefix}_Available_Nmin')
-    X = data.loc[:, features].values
+    x = data.loc[:, features].values
     y = data.loc[:, [calc_goal+'_N_Aver']].values
 
     y_true_combined = data.loc[:, [calc_goal + '_N_Aver', calc_goal + '_Available_Nmax',
                                    calc_goal + '_Available_Nmin']].values
 
     n = test_start_index
-    X_train, X_test = X[:n], X[n:]
+    x_train, x_test = x[:n], x[n:]
     y_train, y_test = y[:n], y[n:]
     y_train_comb_raw, y_test_comb_raw = y_true_combined[:n], y_true_combined[n:]
 
     scaler_x = MinMaxScaler()
     scaler_y = MinMaxScaler()
 
-    X_train_s = scaler_x.fit_transform(X_train)
-    X_test_s = scaler_x.transform(X_test)
+    x_train_s = scaler_x.fit_transform(x_train)
+    x_test_s = scaler_x.transform(x_test)
 
     scaler_y.fit(y_train)
     y_train_s =scaler_y.transform(y_train)
@@ -482,12 +477,8 @@ def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, 
 
     test_idx = data.index[test_start_index:]
 
-    return X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined
+    return x_train_s, x_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined, y_test_comb_raw
 def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model):
-
-    print("best_window_model_name:", best_window_model_name)
-    print("best_stat_model_name:", best_stat_model_name)
-
     data = pd.read_csv(filepath, delimiter=';', parse_dates=['Date'], dayfirst=True)
 
     data['TEC_N_Aver_pred'] = data['TEC_N_Aver']
@@ -523,8 +514,8 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data.loc[data['B4_N_Aver'] <= 76, 'B4_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] <= 50, 'TEC_N_Aver'] = 0
 
-        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT41_N_Aver')
-        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT42_N_Aver')
+        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, data['B4_GT41_N_Aver'])
+        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, data['B4_GT42_N_Aver'])
 
         data['B1_Available_Nmax'] = data['B1_inWork'] * 250
         data['B2_Available_Nmax'] = data['B2_inWork'] * 250
@@ -555,7 +546,6 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         remaining_preds = results[best_stat_model_name].flatten()[-len(remaining_indices):]
         data.loc[remaining_indices, 'TEC_N_Aver_pred'] = remaining_preds
 
-
         data['T_Prev'] = data['T'].shift(1)
         data['Month_sin_Prev'] = data['Month_sin'].shift(1)
         data['Month_cos_Prev'] = data['Month_cos'].shift(1)
@@ -577,7 +567,7 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data['B3_Available_Nmax_Prev'] = data['B3_Available_Nmax'].shift(1)
         data['B4_Available_Nmax_Prev'] = data['B4_Available_Nmax'].shift(1)
         data['TEC_Available_Nmax_Prev'] = data['TEC_Available_Nmax'].shift(1)
-        data['TEC_N_Aver_pred_Prev'] = data['TEC_N_Aver_pred'].shift(1)
+        data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
 
     if filepath == 'data/TEC14_Data.csv':
         data['B1_GT11_N_Aver'] = data['B1_GT11_N'] / 24
@@ -602,10 +592,10 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data.loc[data['B1_N_Aver'] < 45, 'B1_N_Aver'] = 0
         data.loc[data['B2_N_Aver'] < 45, 'B2_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] < 45, 'TEC_N_Aver'] = 0
-        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT11_N_Aver')
-        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT12_N_Aver')
-        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT21_N_Aver')
-        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT22_N_Aver')
+        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0,  data['B1_GT11_N_Aver'])
+        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0,  data['B1_GT12_N_Aver'])
+        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT21_N_Aver'])
+        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT22_N_Aver'])
 
         data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                     data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
@@ -644,34 +634,34 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data['B2_Available_Nmin_Prev'] = data['B2_Available_Nmin'].shift(1)
         data['TEC_Available_Nmax_Prev'] = data['TEC_Available_Nmax'].shift(1)
         data['TEC_Available_Nmin_Prev'] = data['TEC_Available_Nmin'].shift(1)
-        data['TEC_N_Aver_pred_Prev'] = data['TEC_N_Aver_pred'].shift(1)
+        data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
 
     data.dropna(inplace=True)
 
-    features = ['T', 'Month_sin', 'Month_cos', 'TEC_N_Aver_pred', 'TEC_N_Aver_pred',
-     'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev','TEC_N_Aver_pred_Prev']
+    features = ['T', 'Month_sin', 'Month_cos', 'TEC_N_Aver_pred',
+     'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev','TEC_N_Aver_Prev']
     prefixes = goal_mapping[filepath]
     for prefix in prefixes:
         features.append(f'{prefix}_Available_Nmax')
         features.append(f'{prefix}_Available_Nmin')
         features.append(f'{prefix}_Available_Nmax_Prev')
         features.append(f'{prefix}_Available_Nmin_Prev')
-    X = data.loc[:, features].values
+    x = data.loc[:, features].values
     y = data.loc[:, [calc_goal+'_N_Aver']].values
 
     y_true_combined = data.loc[:, [calc_goal + '_N_Aver', calc_goal + '_Available_Nmax',
                                    calc_goal + '_Available_Nmin']].values
 
     n = test_start_index
-    X_train, X_test = X[:n], X[n:]
+    x_train, x_test = x[:n], x[n:]
     y_train, y_test = y[:n], y[n:]
     y_train_comb_raw, y_test_comb_raw = y_true_combined[:n], y_true_combined[n:]
 
     scaler_x = MinMaxScaler()
     scaler_y = MinMaxScaler()
 
-    X_train_s = scaler_x.fit_transform(X_train)
-    X_test_s = scaler_x.transform(X_test)
+    x_train_s = scaler_x.fit_transform(x_train)
+    x_test_s = scaler_x.transform(x_test)
 
     scaler_y.fit(y_train)
     y_train_s =scaler_y.transform(y_train)
@@ -680,15 +670,8 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
     y_train_s_combined = scale_combined(y_train_comb_raw, scaler_y)
     y_test_s_combined = scale_combined(y_test_comb_raw, scaler_y)
 
-    print('X_train_s:',X_train_s.shape)
-    print('X_test_s:',X_test_s.shape)
-    print('y_train_s:',y_train_s.shape)
-    print('y_test_s:',y_test_s.shape)
-    print('y_train_s_combined:',y_train_s_combined.shape)
-    print('y_test_s_combined:',y_test_s_combined.shape)
-
     test_idx = data.index[test_start_index:]
-    return X_train_s, X_test_s, y_train_s, y_test_s, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined
+    return x_train_s, x_test_s, y_train_s, y_test_s, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined, y_test_comb_raw
 
 def prepare_step_data(filepath, test_start_index, n_out):
     data = pd.read_csv(filepath, delimiter=';', parse_dates=['Date'], dayfirst=True)
@@ -724,8 +707,8 @@ def prepare_step_data(filepath, test_start_index, n_out):
         data.loc[data['B4_N_Aver'] <= 76, 'B4_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] <= 50, 'TEC_N_Aver'] = 0
 
-        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT41_N_Aver')
-        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT42_N_Aver')
+        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, data['B4_GT41_N_Aver'])
+        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, data['B4_GT42_N_Aver'])
 
         data['B1_Available_Nmax'] = data['B1_inWork'] * 250
         data['B2_Available_Nmax'] = data['B2_inWork'] * 250
@@ -754,10 +737,16 @@ def prepare_step_data(filepath, test_start_index, n_out):
         data['B2_N_Aver_Prev'] = data['B2_N_Aver'].shift(1)
         data['B3_N_Aver_Prev'] = data['B3_N_Aver'].shift(1)
         data['B4_N_Aver_Prev'] = data['B4_N_Aver'].shift(1)
-        data['B1_Available_N_Prev'] = data['B1_Available_N'].shift(1)
-        data['B2_Available_N_Prev'] = data['B2_Available_N'].shift(1)
-        data['B3_Available_N_Prev'] = data['B3_Available_N'].shift(1)
-        data['B4_Available_N_Prev'] = data['B4_Available_N'].shift(1)
+        data['B1_Available_Nmin_Prev'] = data['B1_Available_Nmin'].shift(1)
+        data['B2_Available_Nmin_Prev'] = data['B2_Available_Nmin'].shift(1)
+        data['B3_Available_Nmin_Prev'] = data['B3_Available_Nmin'].shift(1)
+        data['B4_Available_Nmin_Prev'] = data['B4_Available_Nmin'].shift(1)
+        data['TEC_Available_Nmin_Prev'] = data['TEC_Available_Nmin'].shift(1)
+        data['B1_Available_Nmax_Prev'] = data['B1_Available_Nmax'].shift(1)
+        data['B2_Available_Nmax_Prev'] = data['B2_Available_Nmax'].shift(1)
+        data['B3_Available_Nmax_Prev'] = data['B3_Available_Nmax'].shift(1)
+        data['B4_Available_Nmax_Prev'] = data['B4_Available_Nmax'].shift(1)
+        data['TEC_Available_Nmax_Prev'] = data['TEC_Available_Nmax'].shift(1)
         data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
 
         is_half_block = (data['B4_GT41_inWork'] + data['B4_GT42_inWork'] == 1)
@@ -778,8 +767,8 @@ def prepare_step_data(filepath, test_start_index, n_out):
         data['B1_GT12_inWork'] = np.where(data['B1_GT12_N_Aver'] >= 30, 1, 0)
         data['B2_GT21_inWork'] = np.where(data['B2_GT21_N_Aver'] >= 30, 1, 0)
         data['B2_GT22_inWork'] = np.where(data['B2_GT22_N_Aver'] >= 30, 1, 0)
-        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 50, 1, 0)
-        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 50, 1, 0)
+        data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 45, 1, 0)
+        data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 45, 1, 0)
 
         data.loc[data['B1_GT11_N_Aver'] < 30, 'B1_GT11_N_Aver'] = 0
         data.loc[data['B1_GT12_N_Aver'] < 30, 'B1_GT12_N_Aver'] = 0
@@ -788,10 +777,10 @@ def prepare_step_data(filepath, test_start_index, n_out):
         data.loc[data['B1_N_Aver'] < 45, 'B1_N_Aver'] = 0
         data.loc[data['B2_N_Aver'] < 45, 'B2_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] < 45, 'TEC_N_Aver'] = 0
-        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT11_N_Aver')
-        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT12_N_Aver')
-        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT21_N_Aver')
-        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT22_N_Aver')
+        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0,  data['B1_GT11_N_Aver'])
+        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0,  data['B1_GT12_N_Aver'])
+        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT21_N_Aver'])
+        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT22_N_Aver'])
 
         data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                     data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
@@ -866,7 +855,7 @@ def prepare_step_data(filepath, test_start_index, n_out):
                       f'B1_Available_Nmin_lag{i}', f'B2_Available_Nmin_lag{i}', f'B3_Available_Nmin_lag{i}',
                       f'B4_Available_Nmin_lag{i}', f'TEC_Available_Nmin_lag{i}',
                       f'B1_Available_Nmax_lag{i}', f'B2_Available_Nmax_lag{i}', f'B3_Available_Nmax_lag{i}',
-                      f'B4_Available_Nmax_lag{i}', f'TEC_Available_Nmin_lag{i}',
+                      f'B4_Available_Nmax_lag{i}', f'TEC_Available_Nmax_lag{i}',
                       ]
         if filepath == 'data/TEC14_Data.csv':
             weights = df['sample_weight'].values
@@ -901,7 +890,7 @@ def prepare_step_data(filepath, test_start_index, n_out):
 
     data_with_lag = pd.concat([data, agg], axis=1)
     data_with_lag.dropna(inplace=True)
-    print('data_with_lag:', data_with_lag.shape)
+
     return data_with_lag, base_features, weights_train
 def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_window_model_name, best_stat_model_name, best_step_model, test_idx, calc_goal):
     data = pd.read_csv(filepath, delimiter=';', parse_dates=['Date'], dayfirst=True)
@@ -939,8 +928,8 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
         data.loc[data['B4_N_Aver'] <= 76, 'B4_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] <= 50, 'TEC_N_Aver'] = 0
 
-        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT41_N_Aver')
-        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, 'B1_GT42_N_Aver')
+        data['B4_GT41_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, data['B4_GT41_N_Aver'])
+        data['B4_GT42_N_Aver'] = np.where(data['B4_N_Aver'] < 76, 0, data['B4_GT42_N_Aver'])
 
         data['B1_Available_Nmax'] = data['B1_inWork'] * 250
         data['B2_Available_Nmax'] = data['B2_inWork'] * 250
@@ -1010,8 +999,8 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
         data['B1_GT12_inWork'] = np.where(data['B1_GT12_N_Aver'] >= 30, 1, 0)
         data['B2_GT21_inWork'] = np.where(data['B2_GT21_N_Aver'] >= 30, 1, 0)
         data['B2_GT22_inWork'] = np.where(data['B2_GT22_N_Aver'] >= 30, 1, 0)
-        data['B1_inWork'] = np.where(data['B1_N_Aver'] > 50, 1, 0)
-        data['B2_inWork'] = np.where(data['B2_N_Aver'] > 50, 1, 0)
+        data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 45, 1, 0)
+        data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 45, 1, 0)
 
         data.loc[data['B1_GT11_N_Aver'] < 30, 'B1_GT11_N_Aver'] = 0
         data.loc[data['B1_GT12_N_Aver'] < 30, 'B1_GT12_N_Aver'] = 0
@@ -1020,10 +1009,10 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
         data.loc[data['B1_N_Aver'] < 45, 'B1_N_Aver'] = 0
         data.loc[data['B2_N_Aver'] < 45, 'B2_N_Aver'] = 0
         data.loc[data['TEC_N_Aver'] < 45, 'TEC_N_Aver'] = 0
-        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT11_N_Aver')
-        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0, 'B1_GT12_N_Aver')
-        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT21_N_Aver')
-        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0, 'B2_GT22_N_Aver')
+        data['B1_GT11_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0,  data['B1_GT11_N_Aver'])
+        data['B1_GT12_N_Aver'] = np.where(data['B1_N_Aver'] < 45, 0,  data['B1_GT12_N_Aver'])
+        data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT21_N_Aver'])
+        data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT22_N_Aver'])
 
         data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
                     data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
@@ -1066,15 +1055,15 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
         data['TEC_Available_Nmax_Prev'] = data['TEC_Available_Nmax'].shift(1)
         data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
 
-    base_features = ['T', 'Month_sin', 'Month_cos', 'T_Prev', 'TEC_N_Aver_Prev']
+    base_features = ['T', 'Month_sin', 'Month_cos', 'TEC_N_Aver_pred',
+     'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev','TEC_N_Aver_Prev']
     prefixes = goal_mapping[filepath]
     for prefix in prefixes:
         base_features.append(f'{prefix}_Available_Nmax')
         base_features.append(f'{prefix}_Available_Nmin')
         base_features.append(f'{prefix}_Available_Nmax_Prev')
         base_features.append(f'{prefix}_Available_Nmin_Prev')
-        base_features.append(f'{prefix}_N_Aver_Prev')
-        base_features.append(f'{prefix}_N_Aver_Prev')
+        #base_features.append(f'{prefix}_N_Aver_Prev')
 
     df = DataFrame(data)
 
@@ -1154,24 +1143,26 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
     return data_with_lag, base_features, weights_train
 
 def prepare_direct_data(filepath, data_with_lag, step, base_features, train_size):
-    step_features = base_features + [f'T_lag{step}']
+    current_features = base_features.copy()
+
+    current_features.append(f'T_lag{step}')
     prefixes = goal_mapping[filepath]
     for prefix in prefixes:
-        base_features.append(f'{prefix}_Available_Nmax_lag{step}')
-        base_features.append(f'{prefix}_Available_Nmin_lag{step}')
+        current_features.append(f'{prefix}_Available_Nmax_lag{step}')
+        current_features.append(f'{prefix}_Available_Nmin_lag{step}')
 
-    x = data_with_lag[step_features].values
+    x = data_with_lag[current_features].values
     y = data_with_lag.loc[:, [f'TEC_N_Aver_lag{step}']].values
     y_true_combined = data_with_lag.loc[:, [f'TEC_N_Aver_lag{step}', f'TEC_Available_Nmax_lag{step}',
                                    f'TEC_Available_Nmin_lag{step}']].values
 
-    X_train_raw, X_test_raw = x[:train_size], x[train_size:]
+    x_train_raw, x_test_raw = x[:train_size], x[train_size:]
     y_train_raw, y_test_raw = y[:train_size], y[train_size:]
     y_train_comb_raw, y_test_comb_raw = y_true_combined[:train_size], y_true_combined[train_size:]
 
     scaler_x = MinMaxScaler()
-    X_train_scaled = scaler_x.fit_transform(X_train_raw)
-    X_test_scaled = scaler_x.transform(X_test_raw)
+    x_train_scaled = scaler_x.fit_transform(x_train_raw)
+    x_test_scaled = scaler_x.transform(x_test_raw)
 
     scaler_y = MinMaxScaler()
     scaler_y.fit(y_train_raw)
@@ -1181,28 +1172,35 @@ def prepare_direct_data(filepath, data_with_lag, step, base_features, train_size
     y_train_s_combined = scale_combined(y_train_comb_raw, scaler_y)
     y_test_s_combined = scale_combined(y_test_comb_raw, scaler_y)
 
-    return (X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled,
-            scaler_y, y_test_raw, y_train_s_combined, y_test_s_combined)
+    return (x_train_scaled, x_test_scaled, y_train_scaled, y_test_scaled,
+            scaler_y, y_test_raw, y_train_s_combined, y_test_s_combined, y_test_comb_raw)
 def prepare_meta_direct_data(filepath, data_with_lag, step, base_features, train_size, calc_goal):
 
-    step_features = base_features + [f'T_lag{step}', f'TEC_N_Aver_pred_lag{step}']
+    current_features = base_features.copy()
+
+    current_features.append(f'T_lag{step}')
+    current_features.append(f'TEC_N_Aver_pred_lag{step}')
+    current_features.append(calc_goal + f'_Available_Nmax_lag{step}')
+    current_features.append(calc_goal + f'_Available_Nmin_lag{step}')
+    '''
     prefixes = goal_mapping[filepath]
     for prefix in prefixes:
-        base_features.append(f'{prefix}_Available_Nmax_lag{step}')
-        base_features.append(f'{prefix}_Available_Nmin_lag{step}')
+        current_features.append(f'{prefix}_Available_Nmax_lag{step}')
+        current_features.append(f'{prefix}_Available_Nmin_lag{step}')
+    '''
 
-    x = data_with_lag[step_features].values
+    x = data_with_lag[current_features].values
     y = data_with_lag.loc[:, [calc_goal + f'_N_Aver_lag{step}']].values
-    y_true_combined = data_with_lag.loc[:, [calc_goal + f'_N_Aver', calc_goal + f'_Available_Nmax',
-                                   calc_goal + f'_Available_Nmin']].values
+    y_true_combined = data_with_lag.loc[:, [calc_goal + f'_N_Aver_lag{step}', calc_goal + f'_Available_Nmax_lag{step}',
+                                   calc_goal + f'_Available_Nmin_lag{step}']].values
 
-    X_train_raw, X_test_raw = x[:train_size], x[train_size:]
+    x_train_raw, x_test_raw = x[:train_size], x[train_size:]
     y_train_raw, y_test_raw = y[:train_size], y[train_size:]
     y_train_comb_raw, y_test_comb_raw = y_true_combined[:train_size], y_true_combined[train_size:]
 
     scaler_x = MinMaxScaler()
-    X_train_scaled = scaler_x.fit_transform(X_train_raw)
-    X_test_scaled = scaler_x.transform(X_test_raw)
+    x_train_scaled = scaler_x.fit_transform(x_train_raw)
+    x_test_scaled = scaler_x.transform(x_test_raw)
 
     scaler_y = MinMaxScaler()
     scaler_y.fit(y_train_raw)
@@ -1212,10 +1210,10 @@ def prepare_meta_direct_data(filepath, data_with_lag, step, base_features, train
     y_train_s_combined = scale_combined(y_train_comb_raw, scaler_y)
     y_test_s_combined = scale_combined(y_test_comb_raw, scaler_y)
 
-    return (X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled,
-            scaler_y, y_test_raw, y_train_s_combined, y_test_s_combined)
+    return (x_train_scaled, x_test_scaled, y_train_scaled, y_test_scaled,
+            scaler_y, y_test_raw, y_train_s_combined, y_test_s_combined, y_test_comb_raw)
 
-def optuna_cbr_search(trial, X_train, y_train, X_test, y_test, scaler_y):
+def optuna_cbr_search(trial, x_train, y_train, x_test, y_test, scaler_y):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     params = {
         "iterations": 1000,
@@ -1229,15 +1227,15 @@ def optuna_cbr_search(trial, X_train, y_train, X_test, y_test, scaler_y):
     pruning_callback = CatBoostPruningCallback(trial, "MAE")
 
     model = CatBoostRegressor(**params)
-    model.fit(X_train, y_train, eval_set=(X_test, y_test), use_best_model=True, callbacks=[pruning_callback])
+    model.fit(x_train, y_train, eval_set=(x_test, y_test), use_best_model=True, callbacks=[pruning_callback])
 
-    preds = model.predict(X_test)
+    preds = model.predict(x_test)
     y_pred_unscaled = scaler_y.inverse_transform(preds.reshape(-1, 1))
     y_test_unscaled = scaler_y.inverse_transform(y_test.reshape(-1, 1))
     mae = metrics.mean_absolute_error(y_pred_unscaled, y_test_unscaled)
 
     return mae
-def optuna_rfr_search(trial, X_train, y_train, X_test, y_test, scaler_y):
+def optuna_rfr_search(trial, x_train, y_train, x_test, y_test, scaler_y):
     params = {
         "n_estimators": trial.suggest_int("n_estimators", 50, 500),
         "max_depth": trial.suggest_int("max_depth", 3, 20),
@@ -1248,17 +1246,17 @@ def optuna_rfr_search(trial, X_train, y_train, X_test, y_test, scaler_y):
     }
 
     model = RandomForestRegressor(**params)
-    model.fit(X_train, y_train.ravel())
+    model.fit(x_train, y_train.ravel())
 
-    preds = model.predict(X_test)
+    preds = model.predict(x_test)
     yhat = scaler_y.inverse_transform(preds.reshape(-1, 1))
     y_true = scaler_y.inverse_transform(y_test.reshape(-1, 1))
 
     mae = metrics.mean_absolute_error(y_true, yhat)
 
     return mae
-def optuna_lstm_search(trial, X_train, y_train, X_test, y_test, scaler_y, input_shape, y_train_s_combined, y_test_s_combined):
-    #optuna.logging.set_verbosity(optuna.logging.WARNING)
+def optuna_lstm_search(trial, x_train, y_train, x_test, y_test, scaler_y, input_shape, y_train_s_combined, y_test_s_combined):
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
     n_units_lstm = trial.suggest_int('n_units_lstm', 20, 150) if trial else 50
     n_units_dense = trial.suggest_int('n_units_dense', 10, 50) if trial else 25
     lr = trial.suggest_float('lr', 1e-4, 1e-2, log=True) if trial else 0.001
@@ -1270,13 +1268,13 @@ def optuna_lstm_search(trial, X_train, y_train, X_test, y_test, scaler_y, input_
     ])
     optimizer = Adam(learning_rate=lr)
     model.compile(optimizer=optimizer, loss=custom_loss)
-    model.fit(X_train, y_train_s_combined, validation_data=(X_test, y_test_s_combined), epochs=25, batch_size=32, verbose=0, callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_loss')])
-    pred_lstm_s = model.predict(X_test)
+    model.fit(x_train, y_train_s_combined, validation_data=(x_test, y_test_s_combined), epochs=25, batch_size=32, verbose=0, callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_loss')])
+    pred_lstm_s = model.predict(x_test)
     y_pred_unscaled = scaler_y.inverse_transform(pred_lstm_s)
     y_test_unscaled = scaler_y.inverse_transform(y_test)
     mae = metrics.mean_absolute_error(y_pred_unscaled, y_test_unscaled)
     return mae
-def optuna_mlp_search(trial, X_train, y_train, X_test, y_test, scaler_y, y_train_s_combined, y_test_s_combined):
+def optuna_mlp_search(trial, x_train, y_train, x_test, y_test, scaler_y, y_train_s_combined, y_test_s_combined):
 
     n_layers = trial.suggest_int('n_layers', 1, 3)
     lr = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
@@ -1289,10 +1287,10 @@ def optuna_mlp_search(trial, X_train, y_train, X_test, y_test, scaler_y, y_train
     model.add(Dense(1))
     model.compile(optimizer=Adam(learning_rate=lr), loss=custom_loss)
 
-    model.fit(X_train, y_train_s_combined, validation_data=(X_test, y_test_s_combined),
+    model.fit(x_train, y_train_s_combined, validation_data=(x_test, y_test_s_combined),
               epochs=25, batch_size=32, verbose=0, callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_loss')])
 
-    preds = model.predict(X_test)
+    preds = model.predict(x_test)
     y_pred_unscaled = scaler_y.inverse_transform(preds.reshape(-1, 1))
     y_test_unscaled = scaler_y.inverse_transform(y_test.reshape(-1, 1))
     mae = metrics.mean_absolute_error(y_pred_unscaled, y_test_unscaled)
@@ -1320,3 +1318,60 @@ def scale_combined(combined_data, scaler):
     col1 = scaler.transform(combined_data[:, 1:2])
     col2 = scaler.transform(combined_data[:, 2:3])
     return np.column_stack([col0, col1, col2])
+
+
+def reconcile_with_mip(df_preds, tec_col, boiler_prefixes):
+    # Словарь для хранения результатов по каждому бойлеру
+    results = {p: [] for p in boiler_prefixes}
+
+    for idx, row in df_preds.iterrows():
+        tec_p = row[tec_col]
+
+        model = pulp.LpProblem("Power_Balance", pulp.LpMinimize)
+
+        # Переменные для решения
+        targets = {}  # значения мощности
+        ons = {}  # бинарные (вкл/выкл)
+        diffs = {}  # отклонения для минимизации
+
+        for p in boiler_prefixes:
+            # Читаем данные из строки по шаблону названия колонок
+            p_val = row[f"{p}_N_Aver_pred"]
+            p_min = row[f"{p}_Available_Nmin"]
+            p_max = row[f"{p}_Available_Nmax"]
+
+            # Создаем переменные Pulp
+            targets[p] = pulp.LpVariable(f"target_{p}", lowBound=0)
+            ons[p] = pulp.LpVariable(f"on_{p}", cat=pulp.LpBinary)
+            diffs[p] = pulp.LpVariable(f"d_{p}", lowBound=0)
+
+            # Целевая функция: минимизируем сумму отклонений
+            model += diffs[p] >= targets[p] - p_val
+            model += diffs[p] >= p_val - targets[p]
+
+            # Граничные условия (вкл/выкл)
+            model += targets[p] >= ons[p] * p_min
+            model += targets[p] <= ons[p] * p_max
+
+        # Главное условие: сумма бойлеров = ТЭЦ
+        model += pulp.lpSum(targets.values()) == tec_p
+
+        # Минимизируем сумму всех отклонений
+        model.objective = pulp.lpSum(diffs.values())
+
+        model.solve(pulp.PULP_CBC_CMD(msg=0))
+
+        # Сохраняем результаты
+        for p in boiler_prefixes:
+            results[p].append(pulp.value(targets[p]))
+
+    # Формируем итоговый DataFrame
+    output = pd.DataFrame({'TEC_Total_Pred': df_preds[tec_col].values})
+    for p in boiler_prefixes:
+        output[f'{p}_Reconciled'] = results[p]
+
+    # Проверка суммы
+    reconciled_cols = [f'{p}_Reconciled' for p in boiler_prefixes]
+    output['Sum_Check'] = output[reconciled_cols].sum(axis=1)
+
+    return output
