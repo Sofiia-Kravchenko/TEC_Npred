@@ -54,10 +54,11 @@ def main():
         print(calc_goal, 'best_stat_model_name:', best_stat_model_name)
         results = {k: np.array(v).flatten() for k, v in results.items()}
     df_report = pd.DataFrame(results)
+    df_report.to_excel('df_report.xlsx', index=False)
 
     goal_mapping = {
-        "data/TEC22_Data.csv": ["B1", "B2", "B3", "B4", "TEC"],
-        "data/TEC14_Data.csv": ["B1", "B2", "TEC"]
+        "data/TEC22_Data.csv": ["B1", "B2", "B3", "B4", "TEC_N_Aver_pred"],
+        "data/TEC14_Data.csv": ["B1", "B2", "TEC_N_Aver_pred"]
     }
 
     elements = goal_mapping[data_path]

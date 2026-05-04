@@ -1321,7 +1321,6 @@ def scale_combined(combined_data, scaler):
 
 
 def reconcile_with_mip(df_preds, tec_col, boiler_prefixes):
-    # Словарь для хранения результатов по каждому бойлеру
     results = {p: [] for p in boiler_prefixes}
 
     for idx, row in df_preds.iterrows():
@@ -1329,48 +1328,36 @@ def reconcile_with_mip(df_preds, tec_col, boiler_prefixes):
 
         model = pulp.LpProblem("Power_Balance", pulp.LpMinimize)
 
-        # Переменные для решения
-        targets = {}  # значения мощности
-        ons = {}  # бинарные (вкл/выкл)
-        diffs = {}  # отклонения для минимизации
+        targets = {}
+        ons = {}
+        diffs = {}
 
         for p in boiler_prefixes:
-            # Читаем данные из строки по шаблону названия колонок
             p_val = row[f"{p}_N_Aver_pred"]
             p_min = row[f"{p}_Available_Nmin"]
             p_max = row[f"{p}_Available_Nmax"]
 
-            # Создаем переменные Pulp
             targets[p] = pulp.LpVariable(f"target_{p}", lowBound=0)
             ons[p] = pulp.LpVariable(f"on_{p}", cat=pulp.LpBinary)
             diffs[p] = pulp.LpVariable(f"d_{p}", lowBound=0)
 
-            # Целевая функция: минимизируем сумму отклонений
             model += diffs[p] >= targets[p] - p_val
             model += diffs[p] >= p_val - targets[p]
 
-            # Граничные условия (вкл/выкл)
             model += targets[p] >= ons[p] * p_min
             model += targets[p] <= ons[p] * p_max
 
-        # Главное условие: сумма бойлеров = ТЭЦ
         model += pulp.lpSum(targets.values()) == tec_p
 
-        # Минимизируем сумму всех отклонений
         model.objective = pulp.lpSum(diffs.values())
 
         model.solve(pulp.PULP_CBC_CMD(msg=0))
 
-        # Сохраняем результаты
-        for p in boiler_prefixes:
-            results[p].append(pulp.value(targets[p]))
+        for p in boiler_prefixes:results[p].append(pulp.value(targets[p]))
 
-    # Формируем итоговый DataFrame
     output = pd.DataFrame({'TEC_Total_Pred': df_preds[tec_col].values})
-    for p in boiler_prefixes:
-        output[f'{p}_Reconciled'] = results[p]
+    for p in boiler_prefixes:output[f'{p}_Reconciled'] = results[p]
 
-    # Проверка суммы
     reconciled_cols = [f'{p}_Reconciled' for p in boiler_prefixes]
     output['Sum_Check'] = output[reconciled_cols].sum(axis=1)
 
