@@ -1,17 +1,19 @@
 import optuna
 import pandas as pd
 import numpy as np
+import tensorflow as tf
+import pulp
+import seaborn as sns
 from catboost import CatBoostRegressor
 from keras import Sequential
 from keras.layers import LSTM, Dense
 from keras.optimizers import Adam
+from matplotlib import pyplot as plt
 from sklearn import metrics
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import MinMaxScaler
 from pandas import DataFrame, concat
 from optuna.integration import CatBoostPruningCallback
-import tensorflow as tf
-import pulp
 
 goal_mapping = {
     "data/TEC22_Data.csv": ["B1", "B2", "B3", "B4", "TEC"],
@@ -58,15 +60,23 @@ def prepare_stat_data(filepath, test_start_index):
         data['B1_Available_Nmax'] = data['B1_inWork'] * 250
         data['B2_Available_Nmax'] = data['B2_inWork'] * 250
         data['B3_Available_Nmax'] = data['B3_inWork'] * 250
-        data['B4_Available_Nmax'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
-                    data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['B4_GT41_Available_Nmax'] = np.where(data['T'] <= -2.3, data['B4_GT41_inWork']*172.7, data['B4_GT41_inWork']*(-0.9484 * data['T'] + 170.78))
+        data['B4_GT42_Available_Nmax'] = np.where(data['T'] <= -2.3, data['B4_GT42_inWork']*172.7, data['B4_GT42_inWork']*(-0.9484 * data['T'] + 170.78))
+        gt41_conditions = [((data['Year'] >= 2024) & (data['B4_GT41_Available_Nmax'] > 160.0)), (data['Year'] < 2024), ((data['Year'] >= 2024) & (data['B4_GT41_Available_Nmax'] <= 160.0))]
+        gt42_conditions = [((data['Year'] >= 2024) & (data['B4_GT42_Available_Nmax'] > 160.0)), (data['Year'] < 2024), ((data['Year'] >= 2024) & (data['B4_GT42_Available_Nmax'] <= 160.0))]
+        gt41_choices = [160.0, (data['B4_GT41_Available_Nmax']), (data['B4_GT41_Available_Nmax'])]
+        gt42_choices = [160.0, (data['B4_GT42_Available_Nmax']), (data['B4_GT42_Available_Nmax'])]
+        data['B4_GT41_Available_Nmax'] = np.select(gt41_conditions , gt41_choices, 160)
+        data['B4_GT42_Available_Nmax'] = np.select(gt42_conditions , gt42_choices, 160)
+        data['B4_Available_Nmax'] = data['B4_GT41_Available_Nmax'] + data['B4_GT42_Available_Nmax'] + 72*(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])
         data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax']+ data['B4_Available_Nmax']
 
         data['B1_Available_Nmin'] = data['B1_inWork'] * 125
         data['B2_Available_Nmin'] = data['B2_inWork'] * 125
         data['B3_Available_Nmin'] = data['B3_inWork'] * 125
-        data['B4_Available_Nmin'] = (data['B4_GT41_inWork'] * 50 + data['B4_GT42_inWork'] * 50 + 26 * (
-                    data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['B4_Available_Nmin'] = np.where(data['T'] <= -2.3,
+                                             0.5*data['B4_GT41_inWork']*172.7 + 0.5*data['B4_GT42_inWork']*172.7 + 26*(data['B4_GT41_inWork'] + data['B4_GT42_inWork']),
+                                             0.5*data['B4_GT41_inWork']*(-0.9484 * data['T'] + 170.78) + 0.5*data['B4_GT42_inWork']*(-0.9484 * data['T'] + 170.78) + 26*(data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
         data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin']+ data['B4_Available_Nmin']
 
         data.dropna(inplace=True)
@@ -75,6 +85,47 @@ def prepare_stat_data(filepath, test_start_index):
                         'B1_Available_Nmax', 'B2_Available_Nmax', 'B3_Available_Nmax', 'B4_Available_Nmax', 'TEC_Available_Nmax',
                         'B1_Available_Nmin', 'B2_Available_Nmin', 'B3_Available_Nmin', 'B4_Available_Nmin', 'TEC_Available_Nmin']].values
         y = data.loc[:, ['TEC_N_Aver']].values
+
+        corr_features = [
+            'T',  'Month_sin', 'Month_cos',
+                        'B1_Nmax', 'B2_Nmax', 'B3_Nmax', 'B4_Nmax', 'TEC_Nmax',
+                        'B1_Nmin', 'B2_Nmin', 'B3_Nmin', 'B4_Nmin', 'TEC_Nmin', 'TEC_N_Aver'
+        ]
+
+        # Создаем временный DataFrame из массивов x и y
+        df_corr = pd.DataFrame(
+            data=np.hstack([x, y]),
+            columns=corr_features
+        )
+
+        corr_matrix = df_corr.corr()
+        plt.figure(figsize=(14, 11), dpi=100)
+        sns.set_theme(style='white')
+        plt.rcParams.update({
+            'font.size': 14,
+            'axes.labelsize': 16,
+            'xtick.labelsize': 13,
+            'ytick.labelsize': 13
+        })
+
+        sns.heatmap(
+            corr_matrix,
+            annot=True,
+            fmt=".2f",
+            cmap="coolwarm",
+            linewidths=1.5,
+            vmin=-1, vmax=1,
+            annot_kws={"size": 14, "weight": "bold"},
+            cbar_kws={"shrink": 0.8}
+        )
+
+        plt.xticks(rotation=45, ha='right', weight='bold')
+        plt.yticks(rotation=0, weight='bold')
+
+        plt.title('Correlation matrix of CHP and electricity generation features', fontsize=18, pad=20, weight='bold')
+        plt.tight_layout()
+
+        plt.show()
 
         y_true_combined = data.loc[:, ['TEC_N_Aver', 'TEC_Available_Nmax',
                                        'TEC_Available_Nmin']].values
@@ -107,16 +158,20 @@ def prepare_stat_data(filepath, test_start_index):
         data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT21_N_Aver'])
         data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT22_N_Aver'])
 
-        data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
-                    data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
-        data['B2_Available_Nmax'] = (data['B2_GT21_inWork'] * 70 + data['B2_GT22_inWork'] * 70 + 26 * (
-                    data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * (2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + data['B1_GT12_inWork'] * (2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + 26 * (data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
+        data['B2_Available_Nmax'] = (data['B2_GT21_inWork'] * (2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + data['B2_GT22_inWork'] * (2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + 26 * (data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
         data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax']
 
-        data['B1_Available_Nmin'] = (data['B1_GT11_inWork'] * 30 + data['B1_GT12_inWork'] * 30 + 15 * (
-                    data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
-        data['B2_Available_Nmin'] = (data['B2_GT21_inWork'] * 30 + data['B2_GT22_inWork'] * 30 + 15 * (
-                    data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['B1_Available_Nmin'] = (data['B1_GT11_inWork'] * 0.4*(2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + data['B1_GT12_inWork'] * 0.4*(2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + 15 * ( data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
+        data['B2_Available_Nmin'] = (data['B2_GT21_inWork'] * 0.4*(2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + data['B2_GT22_inWork'] * 0.4*(2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + 15 * (data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
         data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin']
 
         data.dropna(inplace=True)
@@ -128,6 +183,56 @@ def prepare_stat_data(filepath, test_start_index):
         y = data.loc[:, ['TEC_N_Aver']].values
         y_true_combined = data.loc[:, ['TEC_N_Aver', 'TEC_Available_Nmax',
                                        'TEC_Available_Nmin']].values
+
+        corr_features = [
+            'T', 'Month_sin', 'Month_cos',
+            'B1_Nmax', 'B2_Nmax',  # Сократил названия для лучшей читаемости на графике
+            'B1_Nmin', 'B2_Nmin',
+            'TEC_Nmax', 'TEC_Nmin',
+            'TEC_N_Aver'  # Наша целевая переменная Y
+        ]
+
+        # Создаем временный DataFrame из массивов x и y
+        df_corr = pd.DataFrame(
+            data=np.hstack([x, y]),
+            columns=corr_features
+        )
+
+        # 2. Считаем матрицу корреляции Пирсона
+        corr_matrix = df_corr.corr()
+
+        # 3. Настраиваем глобальные крупные шрифты для графика
+        plt.figure(figsize=(14, 11), dpi=100)
+        sns.set_theme(style='white')
+        plt.rcParams.update({
+            'font.size': 14,  # Крупный базовый шрифт
+            'axes.labelsize': 16,  # Шрифт осей
+            'xtick.labelsize': 13,  # Шрифт подписей колонок по X
+            'ytick.labelsize': 13  # Шрифт подписей строк по Y
+        })
+
+        # 4. Строим тепловую карту (Heatmap)
+        # Используем расходящуюся палитру 'coolwarm' (синий - холодно/отрицательно, красный - горячо/положительно)
+        sns.heatmap(
+            corr_matrix,
+            annot=True,  # Включает отображение цифр внутри ячеек
+            fmt=".2f",  # Округляет значения до 2 знаков после запятой
+            cmap="coolwarm",  # Контрастная цветовая схема
+            linewidths=1.5,  # Толщина белых линий-разделителей ячеек
+            vmin=-1, vmax=1,  # Фиксируем границы корреляции от -1 до 1
+            annot_kws={"size": 14, "weight": "bold"},  # КРУПНЫЙ и ЖИРНЫЙ шрифт цифр внутри ячеек
+            cbar_kws={"shrink": 0.8}  # Немного уменьшаем боковую цветовую шкалу
+        )
+
+        # 5. Красиво поворачиваем подписи, чтобы они не налезали друг на друга
+        plt.xticks(rotation=45, ha='right', weight='bold')
+        plt.yticks(rotation=0, weight='bold')
+
+        plt.title('Correlation matrix of CHP and electricity generation features', fontsize=18, pad=20, weight='bold')
+        plt.tight_layout()
+
+        # 6. Выводим на экран
+        plt.show()
 
     data.set_index('Date', inplace=True)
 
@@ -192,16 +297,25 @@ def prepare_window_data(filepath, test_start_index):
         data['B1_Available_Nmax'] = data['B1_inWork'] * 250
         data['B2_Available_Nmax'] = data['B2_inWork'] * 250
         data['B3_Available_Nmax'] = data['B3_inWork'] * 250
-        data['B4_Available_Nmax'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
-                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
-        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax'] + \
-                                     data['B4_Available_Nmax']
+        data['B4_GT41_Available_Nmax'] = np.where(data['T'] <= -2.3, data['B4_GT41_inWork']*172.7, data['B4_GT41_inWork']*(-0.9484 * data['T'] + 170.78))
+        data['B4_GT42_Available_Nmax'] = np.where(data['T'] <= -2.3, data['B4_GT42_inWork']*172.7, data['B4_GT42_inWork']*(-0.9484 * data['T'] + 170.78))
+        gt41_conditions = [((data['Year'] >= 2024) & (data['B4_GT41_Available_Nmax'] > 160.0)), (data['Year'] < 2024), ((data['Year'] >= 2024) & (data['B4_GT41_Available_Nmax'] <= 160.0))]
+        gt42_conditions = [((data['Year'] >= 2024) & (data['B4_GT42_Available_Nmax'] > 160.0)), (data['Year'] < 2024), ((data['Year'] >= 2024) & (data['B4_GT42_Available_Nmax'] <= 160.0))]
+        gt41_choices = [160.0, (data['B4_GT41_Available_Nmax']), (data['B4_GT41_Available_Nmax'])]
+        gt42_choices = [160.0, (data['B4_GT42_Available_Nmax']), (data['B4_GT42_Available_Nmax'])]
+        data['B4_GT41_Available_Nmax'] = np.select(gt41_conditions , gt41_choices, 160)
+        data['B4_GT42_Available_Nmax'] = np.select(gt42_conditions , gt42_choices, 160)
+        data['B4_Available_Nmax'] = data['B4_GT41_Available_Nmax'] + data['B4_GT42_Available_Nmax'] + 72*(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])
+        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax'] + data['B4_Available_Nmax']
 
         data['B1_Available_Nmin'] = data['B1_inWork'] * 125
         data['B2_Available_Nmin'] = data['B2_inWork'] * 125
         data['B3_Available_Nmin'] = data['B3_inWork'] * 125
-        data['B4_Available_Nmin'] = (data['B4_GT41_inWork'] * 50 + data['B4_GT42_inWork'] * 50 + 26 * (
-                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['B4_Available_Nmin'] = np.where(data['T'] <= -2.3,
+                                             0.5 * data['B4_GT41_inWork'] * 172.7 + 0.5 * data[
+                                                 'B4_GT42_inWork'] * 172.7 + 26 * (data['B4_GT41_inWork'] + data['B4_GT42_inWork']),
+                                             0.5 * data['B4_GT41_inWork'] * (-0.9484 * data['T'] + 170.78) + 0.5 * data[
+                                                 'B4_GT42_inWork'] * (-0.9484 * data['T'] + 170.78) + 26 * (data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
         data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin'] + \
                                      data['B4_Available_Nmin']
 
@@ -336,7 +450,7 @@ def prepare_window_data(filepath, test_start_index):
 
     test_idx = data.index[test_start_index:]
 
-    return x_train_s, x_test_s, y_train_s, y_test_s, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined, y_test_comb_raw
+    return x_train_s, x_test_s, y_train_s, y_test_s, y_test, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined, y_test_comb_raw
 
 def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model):
     data = pd.read_csv(filepath, delimiter=';', parse_dates=['Date'], dayfirst=True)
@@ -380,18 +494,25 @@ def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, 
         data['B1_Available_Nmax'] = data['B1_inWork'] * 250
         data['B2_Available_Nmax'] = data['B2_inWork'] * 250
         data['B3_Available_Nmax'] = data['B3_inWork'] * 250
-        data['B4_Available_Nmax'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
-                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
-        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax'] + \
-                                     data['B4_Available_Nmax']
+        data['B4_GT41_Available_Nmax'] = np.where(data['T'] <= -2.3, data['B4_GT41_inWork']*172.7, data['B4_GT41_inWork']*(-0.9484 * data['T'] + 170.78))
+        data['B4_GT42_Available_Nmax'] = np.where(data['T'] <= -2.3, data['B4_GT42_inWork']*172.7, data['B4_GT42_inWork']*(-0.9484 * data['T'] + 170.78))
+        gt41_conditions = [((data['Year'] >= 2024) & (data['B4_GT41_Available_Nmax'] > 160.0)), (data['Year'] < 2024), ((data['Year'] >= 2024) & (data['B4_GT41_Available_Nmax'] <= 160.0))]
+        gt42_conditions = [((data['Year'] >= 2024) & (data['B4_GT42_Available_Nmax'] > 160.0)), (data['Year'] < 2024), ((data['Year'] >= 2024) & (data['B4_GT42_Available_Nmax'] <= 160.0))]
+        gt41_choices = [160.0, (data['B4_GT41_Available_Nmax']), (data['B4_GT41_Available_Nmax'])]
+        gt42_choices = [160.0, (data['B4_GT42_Available_Nmax']), (data['B4_GT42_Available_Nmax'])]
+        data['B4_GT41_Available_Nmax'] = np.select(gt41_conditions , gt41_choices, 160)
+        data['B4_GT42_Available_Nmax'] = np.select(gt42_conditions , gt42_choices, 160)
+        data['B4_Available_Nmax'] = data['B4_GT41_Available_Nmax'] + data['B4_GT42_Available_Nmax'] + 72*(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])
+        data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax'] + data['B4_Available_Nmax']
 
         data['B1_Available_Nmin'] = data['B1_inWork'] * 125
         data['B2_Available_Nmin'] = data['B2_inWork'] * 125
         data['B3_Available_Nmin'] = data['B3_inWork'] * 125
-        data['B4_Available_Nmin'] = (data['B4_GT41_inWork'] * 50 + data['B4_GT42_inWork'] * 50 + 26 * (
-                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
-        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin'] + \
-                                     data['B4_Available_Nmin']
+        data['B4_Available_Nmin'] = np.where(data['T'] <= -2.3,0.5 * data['B4_GT41_inWork'] * 172.7 + 0.5 * data['B4_GT42_inWork'] * 172.7 + 26 * (data['B4_GT41_inWork'] + data['B4_GT42_inWork']),
+                                             0.5 * data['B4_GT41_inWork'] * (-0.9484 * data['T'] + 170.78) + 0.5 * data['B4_GT42_inWork'] * (-0.9484 * data['T'] + 170.78) + 26 * (data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin'] + data['B4_Available_Nmin']
+
+
 
     if filepath == 'data/TEC14_Data.csv':
         data['B1_GT11_N_Aver'] = data['B1_GT11_N'] / 24
@@ -520,18 +641,25 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data['B1_Available_Nmax'] = data['B1_inWork'] * 250
         data['B2_Available_Nmax'] = data['B2_inWork'] * 250
         data['B3_Available_Nmax'] = data['B3_inWork'] * 250
-        data['B4_Available_Nmax'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
-                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['B4_GT41_Available_Nmax'] = np.where(data['T'] <= -2.3, data['B4_GT41_inWork']*172.7, data['B4_GT41_inWork']*(-0.9484 * data['T'] + 170.78))
+        data['B4_GT42_Available_Nmax'] = np.where(data['T'] <= -2.3, data['B4_GT42_inWork']*172.7, data['B4_GT42_inWork']*(-0.9484 * data['T'] + 170.78))
+        gt41_conditions = [((data['Year'] >= 2024) & (data['B4_GT41_Available_Nmax'] > 160.0)), (data['Year'] < 2024), ((data['Year'] >= 2024) & (data['B4_GT41_Available_Nmax'] <= 160.0))]
+        gt42_conditions = [((data['Year'] >= 2024) & (data['B4_GT42_Available_Nmax'] > 160.0)), (data['Year'] < 2024), ((data['Year'] >= 2024) & (data['B4_GT42_Available_Nmax'] <= 160.0))]
+        gt41_choices = [160.0, (data['B4_GT41_Available_Nmax']), (data['B4_GT41_Available_Nmax'])]
+        gt42_choices = [160.0, (data['B4_GT42_Available_Nmax']), (data['B4_GT42_Available_Nmax'])]
+        data['B4_GT41_Available_Nmax'] = np.select(gt41_conditions , gt41_choices, 160)
+        data['B4_GT42_Available_Nmax'] = np.select(gt42_conditions , gt42_choices, 160)
+        data['B4_Available_Nmax'] = data['B4_GT41_Available_Nmax'] + data['B4_GT42_Available_Nmax'] + 72*(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])
         data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax'] + \
                                      data['B4_Available_Nmax']
 
         data['B1_Available_Nmin'] = data['B1_inWork'] * 125
         data['B2_Available_Nmin'] = data['B2_inWork'] * 125
         data['B3_Available_Nmin'] = data['B3_inWork'] * 125
-        data['B4_Available_Nmin'] = (data['B4_GT41_inWork'] * 50 + data['B4_GT42_inWork'] * 50 + 26 * (
-                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
-        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin'] + \
-                                     data['B4_Available_Nmin']
+        data['B4_Available_Nmin'] = np.where(data['T'] <= -2.3,
+                                             0.5 * data['B4_GT41_inWork'] * 172.7 + 0.5 * data['B4_GT42_inWork'] * 172.7 + 26 * (data['B4_GT41_inWork'] + data['B4_GT42_inWork']),
+                                             0.5 * data['B4_GT41_inWork'] * (-0.9484 * data['T'] + 170.78) + 0.5 * data['B4_GT42_inWork'] * (-0.9484 * data['T'] + 170.78) + 26 * (data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin'] + data['B4_Available_Nmin']
 
         data.dropna(inplace=True)
 
@@ -597,16 +725,20 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT21_N_Aver'])
         data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT22_N_Aver'])
 
-        data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
-                    data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
-        data['B2_Available_Nmax'] = (data['B2_GT21_inWork'] * 70 + data['B2_GT22_inWork'] * 70 + 26 * (
-                    data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * (2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + data['B1_GT12_inWork'] * (2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + 26 * (data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
+        data['B2_Available_Nmax'] = (data['B2_GT21_inWork'] * (2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + data['B2_GT22_inWork'] * (2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + 26 * (data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
         data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax']
 
-        data['B1_Available_Nmin'] = (data['B1_GT11_inWork'] * 30 + data['B1_GT12_inWork'] * 30 + 15 * (
-                    data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
-        data['B2_Available_Nmin'] = (data['B2_GT21_inWork'] * 30 + data['B2_GT22_inWork'] * 30 + 15 * (
-                    data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['B1_Available_Nmin'] = (data['B1_GT11_inWork'] * 0.4*(2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + data['B1_GT12_inWork'] * 0.4*(2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + 15 * ( data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
+        data['B2_Available_Nmin'] = (data['B2_GT21_inWork'] * 0.4*(2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + data['B2_GT22_inWork'] * 0.4*(2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + 15 * (data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
         data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin']
 
         data.dropna(inplace=True)
@@ -671,7 +803,7 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
     y_test_s_combined = scale_combined(y_test_comb_raw, scaler_y)
 
     test_idx = data.index[test_start_index:]
-    return x_train_s, x_test_s, y_train_s, y_test_s, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined, y_test_comb_raw
+    return x_train_s, x_test_s, y_train_s, y_test_s, y_test, scaler_y, data.index, test_idx, y_train_s_combined, y_test_s_combined, y_test_comb_raw
 
 def prepare_step_data(filepath, test_start_index, n_out):
     data = pd.read_csv(filepath, delimiter=';', parse_dates=['Date'], dayfirst=True)
@@ -713,16 +845,26 @@ def prepare_step_data(filepath, test_start_index, n_out):
         data['B1_Available_Nmax'] = data['B1_inWork'] * 250
         data['B2_Available_Nmax'] = data['B2_inWork'] * 250
         data['B3_Available_Nmax'] = data['B3_inWork'] * 250
-        data['B4_Available_Nmax'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
-                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['B4_GT41_Available_Nmax'] = np.where(data['T'] <= -2.3, data['B4_GT41_inWork']*172.7, data['B4_GT41_inWork']*(-0.9484 * data['T'] + 170.78))
+        data['B4_GT42_Available_Nmax'] = np.where(data['T'] <= -2.3, data['B4_GT42_inWork']*172.7, data['B4_GT42_inWork']*(-0.9484 * data['T'] + 170.78))
+        gt41_conditions = [((data['Year'] >= 2024) & (data['B4_GT41_Available_Nmax'] > 160.0)), (data['Year'] < 2024), ((data['Year'] >= 2024) & (data['B4_GT41_Available_Nmax'] <= 160.0))]
+        gt42_conditions = [((data['Year'] >= 2024) & (data['B4_GT42_Available_Nmax'] > 160.0)), (data['Year'] < 2024), ((data['Year'] >= 2024) & (data['B4_GT42_Available_Nmax'] <= 160.0))]
+        gt41_choices = [160.0, (data['B4_GT41_Available_Nmax']), (data['B4_GT41_Available_Nmax'])]
+        gt42_choices = [160.0, (data['B4_GT42_Available_Nmax']), (data['B4_GT42_Available_Nmax'])]
+        data['B4_GT41_Available_Nmax'] = np.select(gt41_conditions , gt41_choices, 160)
+        data['B4_GT42_Available_Nmax'] = np.select(gt42_conditions , gt42_choices, 160)
+        data['B4_Available_Nmax'] = data['B4_GT41_Available_Nmax'] + data['B4_GT42_Available_Nmax'] + 72*(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])
+        data['B4_Available_Nmax'] = data['B4_GT41_Available_Nmax'] + data['B4_GT42_Available_Nmax'] + 72 * (
+                    data['B4_GT41_inWork'] + data['B4_GT42_inWork'])
         data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax'] + \
                                      data['B4_Available_Nmax']
 
         data['B1_Available_Nmin'] = data['B1_inWork'] * 125
         data['B2_Available_Nmin'] = data['B2_inWork'] * 125
         data['B3_Available_Nmin'] = data['B3_inWork'] * 125
-        data['B4_Available_Nmin'] = (data['B4_GT41_inWork'] * 50 + data['B4_GT42_inWork'] * 50 + 26 * (
-                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['B4_Available_Nmin'] = np.where(data['T'] <= -2.3,
+                                             0.5 * data['B4_GT41_inWork'] * 172.7 + 0.5 * data['B4_GT42_inWork'] * 172.7 + 26 * (data['B4_GT41_inWork'] + data['B4_GT42_inWork']),
+                                             0.5 * data['B4_GT41_inWork'] * (-0.9484 * data['T'] + 170.78) + 0.5 * data['B4_GT42_inWork'] * (-0.9484 * data['T'] + 170.78) + 26 * (data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
         data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin'] + \
                                      data['B4_Available_Nmin']
 
@@ -934,16 +1076,24 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
         data['B1_Available_Nmax'] = data['B1_inWork'] * 250
         data['B2_Available_Nmax'] = data['B2_inWork'] * 250
         data['B3_Available_Nmax'] = data['B3_inWork'] * 250
-        data['B4_Available_Nmax'] = (data['B4_GT41_inWork'] * 150 + data['B4_GT42_inWork'] * 150 + 72 * (
-                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['B4_GT41_Available_Nmax'] = np.where(data['T'] <= -2.3, data['B4_GT41_inWork']*172.7, data['B4_GT41_inWork']*(-0.9484 * data['T'] + 170.78))
+        data['B4_GT42_Available_Nmax'] = np.where(data['T'] <= -2.3, data['B4_GT42_inWork']*172.7, data['B4_GT42_inWork']*(-0.9484 * data['T'] + 170.78))
+        gt41_conditions = [((data['Year'] >= 2024) & (data['B4_GT41_Available_Nmax'] > 160.0)), (data['Year'] < 2024), ((data['Year'] >= 2024) & (data['B4_GT41_Available_Nmax'] <= 160.0))]
+        gt42_conditions = [((data['Year'] >= 2024) & (data['B4_GT42_Available_Nmax'] > 160.0)), (data['Year'] < 2024), ((data['Year'] >= 2024) & (data['B4_GT42_Available_Nmax'] <= 160.0))]
+        gt41_choices = [160.0, (data['B4_GT41_Available_Nmax']), (data['B4_GT41_Available_Nmax'])]
+        gt42_choices = [160.0, (data['B4_GT42_Available_Nmax']), (data['B4_GT42_Available_Nmax'])]
+        data['B4_GT41_Available_Nmax'] = np.select(gt41_conditions , gt41_choices, 160)
+        data['B4_GT42_Available_Nmax'] = np.select(gt42_conditions , gt42_choices, 160)
+        data['B4_Available_Nmax'] = data['B4_GT41_Available_Nmax'] + data['B4_GT42_Available_Nmax'] + 72*(data['B4_GT41_inWork'] + data['B4_GT42_inWork'])
         data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax'] + data['B3_Available_Nmax'] + \
                                      data['B4_Available_Nmax']
 
         data['B1_Available_Nmin'] = data['B1_inWork'] * 125
         data['B2_Available_Nmin'] = data['B2_inWork'] * 125
         data['B3_Available_Nmin'] = data['B3_inWork'] * 125
-        data['B4_Available_Nmin'] = (data['B4_GT41_inWork'] * 50 + data['B4_GT42_inWork'] * 50 + 26 * (
-                data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
+        data['B4_Available_Nmin'] = np.where(data['T'] <= -2.3,
+                                             0.5 * data['B4_GT41_inWork'] * 172.7 + 0.5 * data['B4_GT42_inWork'] * 172.7 + 26 * (data['B4_GT41_inWork'] + data['B4_GT42_inWork']),
+                                             0.5 * data['B4_GT41_inWork'] * (-0.9484 * data['T'] + 170.78) + 0.5 * data['B4_GT42_inWork'] * (-0.9484 * data['T'] + 170.78) + 26 * (data['B4_GT41_inWork'] + data['B4_GT42_inWork']))
         data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin'] + data['B3_Available_Nmin'] + \
                                      data['B4_Available_Nmin']
 
@@ -1014,16 +1164,20 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
         data['B2_GT21_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT21_N_Aver'])
         data['B2_GT22_N_Aver'] = np.where(data['B2_N_Aver'] < 45, 0,  data['B2_GT22_N_Aver'])
 
-        data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * 70 + data['B1_GT12_inWork'] * 70 + 26 * (
-                    data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
-        data['B2_Available_Nmax'] = (data['B2_GT21_inWork'] * 70 + data['B2_GT22_inWork'] * 70 + 26 * (
-                    data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['B1_Available_Nmax'] = (data['B1_GT11_inWork'] * (2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + data['B1_GT12_inWork'] * (2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + 26 * (data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
+        data['B2_Available_Nmax'] = (data['B2_GT21_inWork'] * (2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + data['B2_GT22_inWork'] * (2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + 26 * (data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
         data['TEC_Available_Nmax'] = data['B1_Available_Nmax'] + data['B2_Available_Nmax']
 
-        data['B1_Available_Nmin'] = (data['B1_GT11_inWork'] * 30 + data['B1_GT12_inWork'] * 30 + 15 * (
-                    data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
-        data['B2_Available_Nmin'] = (data['B2_GT21_inWork'] * 30 + data['B2_GT22_inWork'] * 30 + 15 * (
-                    data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
+        data['B1_Available_Nmin'] = (data['B1_GT11_inWork'] * 0.4*(2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + data['B1_GT12_inWork'] * 0.4*(2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + 15 * ( data['B1_GT11_inWork'] + data['B1_GT12_inWork']))
+        data['B2_Available_Nmin'] = (data['B2_GT21_inWork'] * 0.4*(2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + data['B2_GT22_inWork'] * 0.4*(2 / 1000000000 * data['T']**6 + 7 / 1000000000 * data['T']**5 - 4 / 1000000 * data['T']**4 - 0.0001 * data['T']**3 + 0.0006 * data['T']**2 - 0.2475 * data['T'] + 69.719)
+                                     + 15 * (data['B2_GT21_inWork'] + data['B2_GT22_inWork']))
         data['TEC_Available_Nmin'] = data['B1_Available_Nmin'] + data['B2_Available_Nmin']
 
         data['sample_weight'] = 1.0
@@ -1255,8 +1409,12 @@ def optuna_rfr_search(trial, x_train, y_train, x_test, y_test, scaler_y):
     mae = metrics.mean_absolute_error(y_true, yhat)
 
     return mae
-def optuna_lstm_search(trial, x_train, y_train, x_test, y_test, scaler_y, input_shape, y_train_s_combined, y_test_s_combined):
+
+
+def optuna_lstm_search(trial, x_train, y_train, x_test, y_test, scaler_y, input_shape,
+                       y_train_s_combined, y_test_s_combined, loss_type='custom'):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
+
     n_units_lstm = trial.suggest_int('n_units_lstm', 20, 150) if trial else 50
     n_units_dense = trial.suggest_int('n_units_dense', 10, 50) if trial else 25
     lr = trial.suggest_float('lr', 1e-4, 1e-2, log=True) if trial else 0.001
@@ -1267,11 +1425,26 @@ def optuna_lstm_search(trial, x_train, y_train, x_test, y_test, scaler_y, input_
         Dense(1)
     ])
     optimizer = Adam(learning_rate=lr)
-    model.compile(optimizer=optimizer, loss=custom_loss)
-    model.fit(x_train, y_train_s_combined, validation_data=(x_test, y_test_s_combined), epochs=25, batch_size=32, verbose=0, callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_loss')])
+
+
+    model_loss = custom_loss if loss_type == 'custom' else 'mae'
+    model.compile(optimizer=optimizer, loss=model_loss)
+
+    model.fit(
+        x_train, y_train_s_combined,
+        validation_data=(x_test, y_test_s_combined),
+        epochs=25,
+        batch_size=32,
+        verbose=0,
+        callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_loss')]
+    )
+
     pred_lstm_s = model.predict(x_test)
     y_pred_unscaled = scaler_y.inverse_transform(pred_lstm_s)
+
+    # В y_test передается оригинальный y_test_s, демасштабируем его для корректного MAE
     y_test_unscaled = scaler_y.inverse_transform(y_test)
+
     mae = metrics.mean_absolute_error(y_pred_unscaled, y_test_unscaled)
     return mae
 def optuna_mlp_search(trial, x_train, y_train, x_test, y_test, scaler_y, y_train_s_combined, y_test_s_combined):
