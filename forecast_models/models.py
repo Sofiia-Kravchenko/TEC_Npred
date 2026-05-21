@@ -34,8 +34,6 @@ def get_catboost(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scal
                               loss_function='MAE',
                               verbose=0)
     return model
-
-
 def get_lstm(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y,
              y_train_s_combined, y_test_s_combined, checkpoint_dir, calc_goal, loss_type='custom'):
 
@@ -77,10 +75,7 @@ def get_lstm(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_t
         model.compile(optimizer=optimizer, loss=model_loss)
 
     return model, early_stop_callback, current_epochs, checkpoint_filepath
-
-def get_linear():
-    return LinearRegression()
-
+def get_linear(): return LinearRegression()
 def get_mlp(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, y_train_s_combined, y_test_s_combined, checkpoint_filepath, params_filepath):
     if os.path.exists(checkpoint_filepath) and os.path.exists(params_filepath):
         print("Loading model and best parameters...")
@@ -113,7 +108,6 @@ def get_mlp(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_te
         optimizer = Adam(learning_rate=best_params['lr'])
         model.compile(optimizer=optimizer, loss=custom_loss)
     return model, early_stop_callback, current_epochs
-
 def get_rfr(X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y):
     study = optuna.create_study(direction="minimize", pruner=optuna.pruners.MedianPruner())
     study.optimize(lambda trial: optuna_rfr_search(trial, X_train_s, y_train_s, X_test_s, y_test_s, scaler_y),

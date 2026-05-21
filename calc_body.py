@@ -18,7 +18,7 @@ from tensorflow.keras.callbacks import ModelCheckpoint
 
 tf.random.set_seed(42)
 
-def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, calc_goal, results, test_idx, best_window_model_name, best_stat_model_name, best_step_model):
+def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, calc_goal, results, test_idx, best_window_model_name, best_stat_model_name, best_step_model, reports_dir):
     if calc_goal == 'TEC':
         x_train_s, x_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, datas, test_idx,  y_train_s_combined, y_test_s_combined, y_test_combined = prepare_stat_data(data_path, test_start_index=test_start_index)
         xw_train_s, xw_test_s, yw_train_s, yw_test_s, yw_test, scaler_yw, datasw, testw_idx,  yw_train_s_combined, yw_test_s_combined, yw_test_combined = prepare_window_data(data_path, test_start_index=test_start_index)
@@ -84,15 +84,6 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
 
         results[f'LSTM_{loss_type}'] = yhat
 
-    plot_compare_models_violations(
-        y_true_real=y_test,
-        y_pred_custom=results['LSTM_custom'],
-        y_pred_mae=results['LSTM_mae'],
-        n_max=y_test_combined[:, 1][:, None],
-        n_min=y_test_combined[:, 2][:, None]
-    )
-
-
     # ---  Linear Regression ---
     print('LR_Stat_Model')
     model_lr = get_linear()
@@ -155,14 +146,6 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
     yhat = np.where(yhat > n_max, n_max, yhat)
     results['MLP'] = np.maximum(yhat, 0)
 
-    plot_single_model_violations(
-        y_true_real=y_test,
-        y_pred=results['MLP'],
-        n_max=y_test_combined[:, 1][:, None],
-        n_min=y_test_combined[:, 2][:, None],
-        model_name='MLP',
-    )
-
     # ---  Random Forest Regression---
     print('RFR_Stat_Model')
     model_rfr = get_rfr(x_train_s, x_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y)
@@ -180,47 +163,11 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
     model_cbw.fit(xw_train_s, yw_train_s, eval_set=(xw_test_s, yw_test_s), early_stopping_rounds=250, use_best_model=True)
     yhat_s = model_cbw.predict(xw_test_s).reshape(-1, 1)
     yhat = scaler_y.inverse_transform(yhat_s)
-    results['Boosting_mae_with_window'] = yhat
-
-    n_max = yw_test_combined[:, 1][:, None]
-    n_min = yw_test_combined[:, 2][:, None]
-
-    over_max_mask = yhat > n_max
-    count_over_max = np.sum(over_max_mask)
-    mean_over_max = np.mean(yhat[over_max_mask] - n_max[over_max_mask]) if count_over_max > 0 else 0
-
-    under_min_mask = yhat < n_min
-    count_under_min = np.sum(under_min_mask)
-    mean_under_min = np.mean(n_min[under_min_mask] - yhat[under_min_mask]) if count_under_min > 0 else 0
-
-    print(f"[RandomForest_with_window_mae Loss - Window] Bounds violations summary:")
-    print(f"  -> Upper bound violations: {count_over_max} times (Mean excess: {mean_over_max:.4f})")
-    print(f"  -> Lower bound violations: {count_under_min} times (Mean deficit: {mean_under_min:.4f})")
 
     yhat[yhat < yw_test_combined[:, 2][:, None]] = 0
     n_max = yw_test_combined[:, 1][:, None]
     yhat = np.where(yhat > n_max, n_max, yhat)
     results['Boosting_custom_with_window'] = np.maximum(yhat, 0)
-
-    over_max_mask = yhat > n_max
-    count_over_max = np.sum(over_max_mask)
-    mean_over_max = np.mean(yhat[over_max_mask] - n_max[over_max_mask]) if count_over_max > 0 else 0
-
-    under_min_mask = yhat < n_min
-    count_under_min = np.sum(under_min_mask)
-    mean_under_min = np.mean(n_min[under_min_mask] - yhat[under_min_mask]) if count_under_min > 0 else 0
-
-    print(f"[Boosting_with_window_custom Loss - Window] Bounds violations summary:")
-    print(f"  -> Upper bound violations: {count_over_max} times (Mean excess: {mean_over_max:.4f})")
-    print(f"  -> Lower bound violations: {count_under_min} times (Mean deficit: {mean_under_min:.4f})")
-
-    plot_compare_models_violations(
-        y_true_real=yw_test,
-        y_pred_custom=results['Boosting_custom_with_window'],
-        y_pred_mae=results['Boosting_mae_with_window'],
-        n_max=yw_test_combined[:, 1][:, None],
-        n_min=yw_test_combined[:, 2][:, None]
-    )
 
     # ---  LSTM with window ---
     print('LSTM_with_window_Stat_Model Evaluation')
@@ -278,22 +225,6 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
 
         results[f'LSTM_{loss_type}_with_window'] = yhat
 
-    plot_compare_models_violations(
-        y_true_real=yw_test,
-        y_pred_custom=results['LSTM_custom_with_window'],
-        y_pred_mae=results['LSTM_mae_with_window'],
-        n_max=yw_test_combined[:, 1][:, None],
-        n_min=yw_test_combined[:, 2][:, None]
-    )
-
-    plot_single_model_violations(
-        y_true_real=yw_test,
-        y_pred=results['LSTM_custom_with_window'],
-        n_max=yw_test_combined[:, 1][:, None],
-        n_min=yw_test_combined[:, 2][:, None],
-        model_name='LSTM_with_window',
-    )
-
     # ---  Random Forest Regression with window---
     print('RFR_with_window_Stat_Model')
     model_rfr = get_rfr(xw_train_s, xw_test_s, yw_train_s, yw_test_s, y_train, y_test, scaler_yw)
@@ -302,45 +233,28 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
     yhat = scaler_y.inverse_transform(yhat_s)
     results['RandomForest_mae_with_window'] = yhat
 
-    n_max = yw_test_combined[:, 1][:, None]
-    n_min = yw_test_combined[:, 2][:, None]
-
-    over_max_mask = yhat > n_max
-    count_over_max = np.sum(over_max_mask)
-    mean_over_max = np.mean(yhat[over_max_mask] - n_max[over_max_mask]) if count_over_max > 0 else 0
-
-    under_min_mask = yhat < n_min
-    count_under_min = np.sum(under_min_mask)
-    mean_under_min = np.mean(n_min[under_min_mask] - yhat[under_min_mask]) if count_under_min > 0 else 0
-
-    print(f"[RandomForest_with_window_mae Loss - Window] Bounds violations summary:")
-    print(f"  -> Upper bound violations: {count_over_max} times (Mean excess: {mean_over_max:.4f})")
-    print(f"  -> Lower bound violations: {count_under_min} times (Mean deficit: {mean_under_min:.4f})")
-
     yhat[yhat < yw_test_combined[:, 2][:, None]] = 0
     n_max = yw_test_combined[:, 1][:, None]
     yhat = np.where(yhat > n_max, n_max, yhat)
     results['RandomForest_custom_with_window'] = np.maximum(yhat, 0)
 
-    plot_compare_models_violations(
-        y_true_real=yw_test,
-        y_pred_custom=results['RandomForest_custom_with_window'],
-        y_pred_mae=results['RandomForest_mae_with_window'],
-        n_max=yw_test_combined[:, 1][:, None],
-        n_min=yw_test_combined[:, 2][:, None]
+    best_window_model_name, best_stat_model_name  = print_stat_results(reports_dir, results, y_test, calc_goal)
+
+    plot_single_model_violations(
+        y_true_real=y_test,
+        y_pred=results[best_stat_model_name],
+        n_max=y_test_combined[:, 1][:, None],
+        n_min=y_test_combined[:, 2][:, None],
+        model_name=best_stat_model_name,
     )
 
-    over_max_mask = yhat > n_max
-    count_over_max = np.sum(over_max_mask)
-    mean_over_max = np.mean(yhat[over_max_mask] - n_max[over_max_mask]) if count_over_max > 0 else 0
-
-    under_min_mask = yhat < n_min
-    count_under_min = np.sum(under_min_mask)
-    mean_under_min = np.mean(n_min[under_min_mask] - yhat[under_min_mask]) if count_under_min > 0 else 0
-
-    print(f"[RandomForest_with_window_custom Loss - Window] Bounds violations summary:")
-    print(f"  -> Upper bound violations: {count_over_max} times (Mean excess: {mean_over_max:.4f})")
-    print(f"  -> Lower bound violations: {count_under_min} times (Mean deficit: {mean_under_min:.4f})")
+    plot_single_model_violations(
+        y_true_real=yw_test,
+        y_pred=results['best_window_model_name'],
+        n_max=yw_test_combined[:, 1][:, None],
+        n_min=yw_test_combined[:, 2][:, None],
+        model_name=best_window_model_name,
+    )
 
     # ---  LSTM direct forecast---
     print('LSTM_direct_Stat_Model')
@@ -362,7 +276,6 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
     cbr_multi_results = np.array(cbr_multi_results).reshape(-1, 14)
     cbr_multi_metrics = np.array(cbr_multi_metrics).reshape(-1, 4)
 
-    best_window_model_name, best_stat_model_name  = print_stat_results(results, y_test, calc_goal)
     best_step_model_name = print_step_results(lstm_multi_metrics, cbr_multi_metrics)
     if best_step_model_name == 'lstm': best_step_model = lstm_multi_results
     if best_step_model_name == 'CBR': best_step_model = cbr_multi_results
