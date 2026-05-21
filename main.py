@@ -23,6 +23,7 @@ def main():
     n_out = args.forecast_window
     model_name = os.path.basename(data_path).split('.')[0]
     checkpoint_dir = f'checkpoint/{model_name}/'
+    reports_dir = f'data/reports/{model_name}/'
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs(checkpoint_dir+'multistep', exist_ok=True)
     tec_results={}
@@ -39,14 +40,14 @@ def main():
 
     warnings.filterwarnings("ignore")
 
-    tec_results, tec_constraints, test_idx, best_window_model_name, best_stat_model_name, best_step_model = calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, calc_goal, tec_results, test_idx, best_window_model_name, best_stat_model_name, best_step_model)
+    tec_results, tec_constraints, test_idx, best_window_model_name, best_stat_model_name, best_step_model = calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, calc_goal, tec_results, test_idx, best_window_model_name, best_stat_model_name, best_step_model, reports_dir)
     results[calc_goal+ '_N_Aver_pred']=tec_results[best_stat_model_name]
     results[calc_goal + '_Available_Nmin'] = tec_constraints[calc_goal + '_Available_Nmin']
     results[calc_goal + '_Available_Nmax'] = tec_constraints[calc_goal + '_Available_Nmax']
     for calc_goal in args.target_power_unit:
         print(f"--- Prediction for: {calc_goal} ---")
 
-        tg_results, tg_constraints, test_idx, best_window_model_name, best_stat_model_name, best_step_model = calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, calc_goal, tec_results, test_idx, best_window_model_name, best_stat_model_name, best_step_model)
+        tg_results, tg_constraints, test_idx, best_window_model_name, best_stat_model_name, best_step_model = calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, calc_goal, tec_results, test_idx, best_window_model_name, best_stat_model_name, best_step_model, reports_dir)
         results[calc_goal + '_N_Aver_pred'] = tg_results[best_stat_model_name]
         results[calc_goal + '_Available_Nmin'] = tg_constraints[calc_goal + '_Available_Nmin']
         results[calc_goal + '_Available_Nmax'] = tg_constraints[calc_goal + '_Available_Nmax']
@@ -72,7 +73,7 @@ def main():
     )
 
     # Сохранение
-    final_report.to_csv('final_tec_report_reconciled.csv', index=False, sep=';')
+    final_report.to_csv(reports_dir + 'final_tec_report_reconciled.csv', index=False, sep=';')
     print("Файл сохранен: final_tec_report_reconciled.csv")
 
 if __name__ == "__main__":

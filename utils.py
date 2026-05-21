@@ -1336,12 +1336,6 @@ def prepare_meta_direct_data(filepath, data_with_lag, step, base_features, train
     current_features.append(f'TEC_N_Aver_pred_lag{step}')
     current_features.append(calc_goal + f'_Available_Nmax_lag{step}')
     current_features.append(calc_goal + f'_Available_Nmin_lag{step}')
-    '''
-    prefixes = goal_mapping[filepath]
-    for prefix in prefixes:
-        current_features.append(f'{prefix}_Available_Nmax_lag{step}')
-        current_features.append(f'{prefix}_Available_Nmin_lag{step}')
-    '''
 
     x = data_with_lag[current_features].values
     y = data_with_lag.loc[:, [calc_goal + f'_N_Aver_lag{step}']].values
@@ -1409,8 +1403,6 @@ def optuna_rfr_search(trial, x_train, y_train, x_test, y_test, scaler_y):
     mae = metrics.mean_absolute_error(y_true, yhat)
 
     return mae
-
-
 def optuna_lstm_search(trial, x_train, y_train, x_test, y_test, scaler_y, input_shape,
                        y_train_s_combined, y_test_s_combined, loss_type='custom'):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -1442,7 +1434,6 @@ def optuna_lstm_search(trial, x_train, y_train, x_test, y_test, scaler_y, input_
     pred_lstm_s = model.predict(x_test)
     y_pred_unscaled = scaler_y.inverse_transform(pred_lstm_s)
 
-    # В y_test передается оригинальный y_test_s, демасштабируем его для корректного MAE
     y_test_unscaled = scaler_y.inverse_transform(y_test)
 
     mae = metrics.mean_absolute_error(y_pred_unscaled, y_test_unscaled)
@@ -1468,7 +1459,6 @@ def optuna_mlp_search(trial, x_train, y_train, x_test, y_test, scaler_y, y_train
     y_test_unscaled = scaler_y.inverse_transform(y_test.reshape(-1, 1))
     mae = metrics.mean_absolute_error(y_pred_unscaled, y_test_unscaled)
     return mae
-
 @tf.keras.utils.register_keras_serializable()
 def custom_loss(y_true_combined, y_pred):
     lambda_bounds = 25.0
@@ -1485,14 +1475,11 @@ def custom_loss(y_true_combined, y_pred):
 
     total_loss = base_loss + lambda_bounds * tf.reduce_mean(upper_penalty + lower_penalty)
     return total_loss
-
 def scale_combined(combined_data, scaler):
     col0 = scaler.transform(combined_data[:, 0:1])
     col1 = scaler.transform(combined_data[:, 1:2])
     col2 = scaler.transform(combined_data[:, 2:3])
     return np.column_stack([col0, col1, col2])
-
-
 def reconcile_with_mip(df_preds, tec_col, boiler_prefixes):
     results = {p: [] for p in boiler_prefixes}
 
