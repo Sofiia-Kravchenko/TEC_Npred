@@ -250,7 +250,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
 
     plot_single_model_violations(
         y_true_real=yw_test,
-        y_pred=results['best_window_model_name'],
+        y_pred=results[best_window_model_name],
         n_max=yw_test_combined[:, 1][:, None],
         n_min=yw_test_combined[:, 2][:, None],
         model_name=best_window_model_name,
