@@ -125,7 +125,7 @@ def prepare_stat_data(filepath, test_start_index):
         plt.title('Correlation matrix of CHP and electricity generation features', fontsize=18, pad=20, weight='bold')
         plt.tight_layout()
 
-        plt.show()
+        #plt.show()
 
         y_true_combined = data.loc[:, ['TEC_N_Aver', 'TEC_Available_Nmax',
                                        'TEC_Available_Nmin']].values
@@ -192,16 +192,13 @@ def prepare_stat_data(filepath, test_start_index):
             'TEC_N_Aver'  # Наша целевая переменная Y
         ]
 
-        # Создаем временный DataFrame из массивов x и y
         df_corr = pd.DataFrame(
             data=np.hstack([x, y]),
             columns=corr_features
         )
 
-        # 2. Считаем матрицу корреляции Пирсона
         corr_matrix = df_corr.corr()
 
-        # 3. Настраиваем глобальные крупные шрифты для графика
         plt.figure(figsize=(14, 11), dpi=100)
         sns.set_theme(style='white')
         plt.rcParams.update({
@@ -215,24 +212,22 @@ def prepare_stat_data(filepath, test_start_index):
         # Используем расходящуюся палитру 'coolwarm' (синий - холодно/отрицательно, красный - горячо/положительно)
         sns.heatmap(
             corr_matrix,
-            annot=True,  # Включает отображение цифр внутри ячеек
-            fmt=".2f",  # Округляет значения до 2 знаков после запятой
-            cmap="coolwarm",  # Контрастная цветовая схема
-            linewidths=1.5,  # Толщина белых линий-разделителей ячеек
-            vmin=-1, vmax=1,  # Фиксируем границы корреляции от -1 до 1
-            annot_kws={"size": 14, "weight": "bold"},  # КРУПНЫЙ и ЖИРНЫЙ шрифт цифр внутри ячеек
-            cbar_kws={"shrink": 0.8}  # Немного уменьшаем боковую цветовую шкалу
+            annot=True,
+            fmt=".2f",
+            cmap="coolwarm",
+            linewidths=1.5,
+            vmin=-1, vmax=1,
+            annot_kws={"size": 14, "weight": "bold"},
+            cbar_kws={"shrink": 0.8}
         )
 
-        # 5. Красиво поворачиваем подписи, чтобы они не налезали друг на друга
         plt.xticks(rotation=45, ha='right', weight='bold')
         plt.yticks(rotation=0, weight='bold')
 
         plt.title('Correlation matrix of CHP and electricity generation features', fontsize=18, pad=20, weight='bold')
         plt.tight_layout()
 
-        # 6. Выводим на экран
-        plt.show()
+        #plt.show()
 
     data.set_index('Date', inplace=True)
 
