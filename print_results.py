@@ -1,10 +1,16 @@
 import os
 
-import matplotlib
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt
+import seaborn as sns
 from sklearn import metrics
+
+import matplotlib
+matplotlib.use('module://backend_interagg')
+import matplotlib.pyplot as plt
+plt.rcParams['text.antialiased'] = True
+plt.rcParams['lines.antialiased'] = True
+from matplotlib import pyplot as plt, ticker
 
 def print_stat_results(reports_dir, results, y_test, calc_goal):
     os.makedirs(reports_dir, exist_ok=True)
@@ -42,7 +48,7 @@ def print_stat_results(reports_dir, results, y_test, calc_goal):
     print("\n[INFO] Report saved to 'model_evaluation_report.csv'")
 
     min_len = min([len(p) for p in results.values()])
-    export_df = pd.DataFrame({'Actual_Q': y_test[-min_len:].flatten()})
+    export_df = pd.DataFrame({'Actual_N': y_test[-min_len:].flatten()})
 
     for name, pred in results.items():
         export_df[name] = pred[-min_len:].flatten()
@@ -178,6 +184,84 @@ def plot_single_model_violations(y_true_real, y_pred, n_max, n_min, model_name, 
 
     ax.legend(loc='upper right', frameon=True, facecolor='#ffffff', framealpha=0.95,
               edgecolor='#e2e8f0', shadow=False, fontsize=18, labelspacing=0.6)
+
+    plt.tight_layout()
+    plt.show()
+def plot_final_graph(output):
+
+    sns.set_theme(style="whitegrid")
+    plt.figure(figsize=(16, 8), dpi=100)
+
+    mae_before = np.mean(np.abs(output['Total_Error_Before']))
+    max_before = output['Total_Error_Before'].max()
+    min_before = output['Total_Error_Before'].min()
+
+    mae_after = np.mean(np.abs(output['Total_Error_After']))
+    max_after = output['Total_Error_After'].max()
+    min_after = output['Total_Error_After'].min()
+
+    stats_text = (
+        f"  ★ PERFORMANCE METRICS ★\n\n"
+        f"BEFORE OPTIMIZATION:\n"
+        f"  • Mean Abs Error (MAE): {mae_before:.2f} MW\n"
+        f"  • Max Overproduction:  {max_before:.2f} MW\n"
+        f"  • Max Underproduction: {min_before:.2f} MW\n\n"
+        f"AFTER OPTIMIZATION:\n"
+        f"  • Mean Abs Error (MAE): {mae_after:.2f} MW\n"
+        f"  • Max Overproduction:  {max_after:.2f} MW\n"
+        f"  • Max Underproduction: {min_after:.2f} MW"
+    )
+
+    plt.plot(
+        output.index,
+        output['Total_Error_Before'],
+        label='Imbalance BEFORE Optimization (Raw Forecast Error)',
+        color='#e63946',
+        linewidth=2.0,
+        alpha=0.85
+    )
+
+    plt.plot(
+        output.index,
+        output['Total_Error_After'],
+        label='Imbalance AFTER Optimization (Perfect Reconciled Balance)',
+        color='#2a9d8f',
+        linewidth=4.0,
+        alpha=0.95
+    )
+
+    plt.axhline(0, color='#1d3557', linestyle='--', linewidth=1.5, alpha=0.8)
+
+    plt.gca().text(
+        0.98, 0.05,
+        stats_text,
+        transform=plt.gca().transAxes,
+        fontsize=13,  # Крупный читаемый шрифт
+        fontweight='medium',
+        fontfamily='monospace',  # Моноширинный шрифт для выравнивания
+        verticalalignment='bottom',
+        horizontalalignment='right',  # ИСПРАВЛЕНО: выравнивание по правому краю
+        bbox=dict(
+            boxstyle='round,pad=0.8',
+            facecolor='#f8f9fa',
+            edgecolor='#cccccc',
+            alpha=0.95
+        )
+    )
+
+    # Настройка подписей, осей и легенды (крупно)
+    plt.title('Optimization Effect: Eliminating Power Imbalance between Plant and Turbogenerators',
+              fontsize=22, fontweight='bold', pad=25)
+    plt.xlabel('Time Intervals (Row Index)', fontsize=16, labelpad=12)
+    plt.ylabel('Imbalance Value (MW / Units)', fontsize=16, labelpad=12)
+
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+
+    plt.ylim(-200, 50)
+
+    plt.legend(fontsize=14, loc='upper right', frameon=True, shadow=True, facecolor='white')
+    plt.grid(True, linestyle=':', alpha=0.6)
 
     plt.tight_layout()
     plt.show()

@@ -1,12 +1,12 @@
-import json
 import os
 
+import json
 import optuna
 import tensorflow as tf
 
 from catboost import CatBoostRegressor
-from keras.optimizers import Adam
-from keras.models import load_model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.models import load_model
 from sklearn.ensemble import RandomForestRegressor
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.models import Sequential
@@ -67,12 +67,14 @@ def get_lstm(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_t
                                             min_delta=0.0001)
 
         model = Sequential([
-            LSTM(best_params['n_units_lstm'], input_shape=input_shape),
+            LSTM(best_params['n_units_lstm'], input_shape=input_shape, unroll=True),
             Dense(best_params['n_units_dense']),
-            Dense(1)
+            Dense(1, dtype='float32')
         ])
         optimizer = Adam(learning_rate=best_params['lr'])
         model.compile(optimizer=optimizer, loss=model_loss)
+        is_mixed = isinstance(model.optimizer, tf.keras.mixed_precision.LossScaleOptimizer)
+        print(f"--- Аппаратный Loss Scale для float16 активен: {is_mixed} ---")
 
     return model, early_stop_callback, current_epochs, checkpoint_filepath
 def get_linear(): return LinearRegression()
@@ -103,7 +105,7 @@ def get_mlp(input_shape, X_train_s, X_test_s, y_train_s, y_test_s, y_train, y_te
         for i in range(best_params['n_layers']):
             model.add(Dense(best_params[f'units_l{i}'], activation='relu'))
 
-        model.add(Dense(1))
+        model.add(Dense(1, dtype='float32'))
 
         optimizer = Adam(learning_rate=best_params['lr'])
         model.compile(optimizer=optimizer, loss=custom_loss)
