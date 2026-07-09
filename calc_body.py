@@ -1,3 +1,6 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -50,7 +53,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
         model_lstm.fit(
             x_train_lstm, y_train_s_combined,
             epochs=current_epochs,
-            batch_size=32,
+            batch_size=1024,
             validation_data=(x_test_lstm, y_test_s_combined),
             callbacks=[early_stop_callback, model_checkpoint_callback],
             verbose=0,
@@ -132,9 +135,9 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
     model_mlp.fit(x_train_s ,
                 y_train_s_combined,
                 epochs=current_epochs,
-                batch_size=32,
+                batch_size=1024,
                 validation_data=(x_test_s, y_test_s_combined),
-                validation_batch_size=32,
+                validation_batch_size=1024,
                 callbacks=[early_stop_callback,model_checkpoint_callback],
                 verbose=0,
                 shuffle=False)
@@ -192,9 +195,9 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
         model_lstmrw.fit(
             xw_train_lstm, yw_train_s_combined,
             epochs=current_epochs,
-            batch_size=32,
+            batch_size=1024,
             validation_data=(xw_test_lstm, yw_test_s_combined),
-            validation_batch_size=32,
+            validation_batch_size=1024,
             callbacks=[early_stop_callback, model_checkpoint_callback],
             verbose=0,
             shuffle=False

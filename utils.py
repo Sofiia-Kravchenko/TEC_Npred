@@ -5,15 +5,16 @@ import tensorflow as tf
 import pulp
 import seaborn as sns
 from catboost import CatBoostRegressor
-from keras import Sequential
-from keras.layers import LSTM, Dense
-from keras.optimizers import Adam
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.optimizers import Adam
 from matplotlib import pyplot as plt
 from sklearn import metrics
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import MinMaxScaler
 from pandas import DataFrame, concat
 from optuna.integration import CatBoostPruningCallback
+from scipy.optimize import minimize
 
 goal_mapping = {
     "data/TEC22_Data.csv": ["B1", "B2", "B3", "B4", "TEC"],
@@ -1405,6 +1406,7 @@ def optuna_rfr_search(trial, x_train, y_train, x_test, y_test, scaler_y):
     return mae
 def optuna_lstm_search(trial, x_train, y_train, x_test, y_test, scaler_y, input_shape,
                        y_train_s_combined, y_test_s_combined, loss_type='custom'):
+
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     n_units_lstm = trial.suggest_int('n_units_lstm', 20, 150) if trial else 50
@@ -1412,33 +1414,44 @@ def optuna_lstm_search(trial, x_train, y_train, x_test, y_test, scaler_y, input_
     lr = trial.suggest_float('lr', 1e-4, 1e-2, log=True) if trial else 0.001
 
     model = Sequential([
-        LSTM(n_units_lstm, input_shape=input_shape),
+        LSTM(n_units_lstm, input_shape=input_shape, unroll=True),
         Dense(n_units_dense),
-        Dense(1)
+        Dense(1, dtype='float32')
     ])
     optimizer = Adam(learning_rate=lr)
-
 
     model_loss = custom_loss if loss_type == 'custom' else 'mae'
     model.compile(optimizer=optimizer, loss=model_loss)
 
+    current_batch_size = 4096
+
+    train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train_s_combined))
+    train_dataset = (train_dataset
+                     .shuffle(buffer_size=len(x_train))
+                     .batch(current_batch_size)
+                     .prefetch(tf.data.AUTOTUNE))
+
+    val_dataset = tf.data.Dataset.from_tensor_slices((x_test, y_test_s_combined))
+    val_dataset = val_dataset.batch(current_batch_size).prefetch(tf.data.AUTOTUNE)
+
     model.fit(
-        x_train, y_train_s_combined,
-        validation_data=(x_test, y_test_s_combined),
+        train_dataset,
+        validation_data=val_dataset,
         epochs=25,
-        batch_size=32,
         verbose=0,
         callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_loss')]
     )
 
-    pred_lstm_s = model.predict(x_test)
+    pred_lstm_s = model.predict(val_dataset, verbose=0)
     y_pred_unscaled = scaler_y.inverse_transform(pred_lstm_s)
-
     y_test_unscaled = scaler_y.inverse_transform(y_test)
 
     mae = metrics.mean_absolute_error(y_pred_unscaled, y_test_unscaled)
     return mae
 def optuna_mlp_search(trial, x_train, y_train, x_test, y_test, scaler_y, y_train_s_combined, y_test_s_combined):
+
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     n_layers = trial.suggest_int('n_layers', 1, 3)
     lr = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
@@ -1448,20 +1461,40 @@ def optuna_mlp_search(trial, x_train, y_train, x_test, y_test, scaler_y, y_train
         units = trial.suggest_int(f'units_l{i}', 16, 128)
         model.add(Dense(units, activation='relu'))
 
-    model.add(Dense(1))
+    model.add(Dense(1, dtype='float32'))
     model.compile(optimizer=Adam(learning_rate=lr), loss=custom_loss)
 
-    model.fit(x_train, y_train_s_combined, validation_data=(x_test, y_test_s_combined),
-              epochs=25, batch_size=32, verbose=0, callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_loss')])
+    current_batch_size = 4096
 
-    preds = model.predict(x_test)
+    train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train_s_combined))
+    train_dataset = (train_dataset 
+                     .shuffle(buffer_size=len(x_train))
+                     .batch(current_batch_size)
+                     .prefetch(tf.data.AUTOTUNE))
+
+    val_dataset = tf.data.Dataset.from_tensor_slices((x_test, y_test_s_combined))
+    val_dataset = val_dataset.batch(current_batch_size).prefetch(tf.data.AUTOTUNE)
+
+    model.fit(
+        train_dataset,
+        validation_data=val_dataset,
+        epochs=25,
+        verbose=0,
+        callbacks=[optuna.integration.TFKerasPruningCallback(trial, 'val_loss')]
+    )
+
+    preds = model.predict(val_dataset, verbose=0)
+
     y_pred_unscaled = scaler_y.inverse_transform(preds.reshape(-1, 1))
     y_test_unscaled = scaler_y.inverse_transform(y_test.reshape(-1, 1))
     mae = metrics.mean_absolute_error(y_pred_unscaled, y_test_unscaled)
+
     return mae
 @tf.keras.utils.register_keras_serializable()
 def custom_loss(y_true_combined, y_pred):
-    lambda_bounds = 25.0
+    dtype = y_pred.dtype
+    lambda_bounds = tf.cast(25.0, dtype=dtype)
+    zero_const = tf.cast(0.0, dtype=dtype)
 
     y_true = y_true_combined[:, 0:1]
     avail_nmax = y_true_combined[:, 1:2]
@@ -1469,17 +1502,18 @@ def custom_loss(y_true_combined, y_pred):
 
     base_loss = tf.reduce_mean(tf.abs(y_true - y_pred))
 
-    upper_penalty = tf.reduce_mean(tf.square(tf.maximum(0.0, y_pred - avail_nmax)))
+    upper_penalty = tf.reduce_mean(tf.square(tf.maximum(zero_const, y_pred - avail_nmax)))
+    lower_penalty = tf.reduce_mean(tf.square(tf.maximum(zero_const, avail_nmin - y_pred)))
 
-    lower_penalty = tf.reduce_mean(tf.square(tf.maximum(0.0, avail_nmin - y_pred)))
+    total_loss = base_loss + lambda_bounds * (upper_penalty + lower_penalty)
 
-    total_loss = base_loss + lambda_bounds * tf.reduce_mean(upper_penalty + lower_penalty)
     return total_loss
 def scale_combined(combined_data, scaler):
     col0 = scaler.transform(combined_data[:, 0:1])
     col1 = scaler.transform(combined_data[:, 1:2])
     col2 = scaler.transform(combined_data[:, 2:3])
     return np.column_stack([col0, col1, col2])
+
 def reconcile_with_mip(df_preds, tec_col, boiler_prefixes):
     results = {p: [] for p in boiler_prefixes}
 
@@ -1513,12 +1547,87 @@ def reconcile_with_mip(df_preds, tec_col, boiler_prefixes):
 
         model.solve(pulp.PULP_CBC_CMD(msg=0))
 
-        for p in boiler_prefixes:results[p].append(pulp.value(targets[p]))
+        for p in boiler_prefixes:
+            results[p].append(pulp.value(targets[p]))
 
-    output = pd.DataFrame({'TEC_Total_Pred': df_preds[tec_col].values})
-    for p in boiler_prefixes:output[f'{p}_Reconciled'] = results[p]
+    output = pd.DataFrame({tec_col: df_preds[tec_col].values}, index=df_preds.index)
 
+    orig_cols = [f"{p}_N_Aver_pred" for p in boiler_prefixes]
     reconciled_cols = [f'{p}_Reconciled' for p in boiler_prefixes]
+
+    for p in boiler_prefixes:
+        orig_col = f"{p}_N_Aver_pred"
+        recon_col = f'{p}_Reconciled'
+        delta_col = f'{p}_Delta'
+
+        output[orig_col] = df_preds[orig_col].values
+        output[recon_col] = results[p]
+        output[delta_col] = output[recon_col] - output[orig_col]
+
     output['Sum_Check'] = output[reconciled_cols].sum(axis=1)
+
+    output['Total_Error_Before'] = output[orig_cols].sum(axis=1) - output[tec_col]
+
+    output['Total_Error_After'] = output['Sum_Check'] - output[tec_col]
+
+    return output
+def reconcile_with_l2(df_preds, tec_col, boiler_prefixes):
+    results = {p: [] for p in boiler_prefixes}
+
+    for idx, row in df_preds.iterrows():
+        tec_p = row[tec_col]
+
+        p_vals = []
+        bounds = []
+
+        for p in boiler_prefixes:
+            p_val = row[f"{p}_N_Aver_pred"]
+            p_min = row[f"{p}_Available_Nmin"]
+            p_max = row[f"{p}_Available_Nmax"]
+
+            p_vals.append(p_val)
+
+            if p_val > 0:
+                bounds.append((p_min, p_max))
+            else:
+                bounds.append((0.0, 0.0))
+
+        p_vals = np.array(p_vals)
+
+        def objective(targets): return np.sum((targets - p_vals) ** 2)
+
+        def constraint_balance(targets):return np.sum(targets) - tec_p
+
+        constraints = {"type": "eq", "fun": constraint_balance}
+
+        x0 = p_vals.copy()
+
+        res = minimize(objective, x0, method="SLSQP", bounds=bounds, constraints=constraints)
+        final_targets = res.x if res.success else x0
+
+        for i, p in enumerate(boiler_prefixes):
+            results[p].append(final_targets[i])
+
+    output = pd.DataFrame(
+        {tec_col: df_preds[tec_col].values}, index=df_preds.index
+    )
+
+    orig_cols = [f"{p}_N_Aver_pred" for p in boiler_prefixes]
+    reconciled_cols = [f"{p}_Reconciled" for p in boiler_prefixes]
+
+    for p in boiler_prefixes:
+        orig_col = f"{p}_N_Aver_pred"
+        recon_col = f"{p}_Reconciled"
+        delta_col = f"{p}_Delta"
+
+        output[orig_col] = df_preds[orig_col].values
+        output[recon_col] = results[p]
+        output[delta_col] = output[recon_col] - output[orig_col]
+
+    output["Sum_Check"] = output[reconciled_cols].sum(axis=1)
+    output["Total_Error_Before"] = (
+        output[orig_cols].sum(axis=1) - output[tec_col]
+    )
+    output["Total_Error_After"] = output["Sum_Check"] - output[tec_col]
 
     return output

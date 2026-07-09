@@ -1,4 +1,19 @@
 import os
+import sys
+import ctypes
+
+sys.stderr = open(os.devnull, 'w')
+
+try:
+    libc = ctypes.CDLL(None)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    libc.dup2(devnull_fd, 2)
+except Exception: pass
+
+os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=-1'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+sys.stderr = open(os.devnull, 'w')
+
 import warnings
 import numpy as np
 import pandas as pd
@@ -6,16 +21,18 @@ import tensorflow as tf
 import argparse
 
 from calc_body import calc_power_generation
-from utils import reconcile_with_mip
+from print_results import plot_final_graph
+from utils import reconcile_with_mip, reconcile_with_l2
+tf.keras.mixed_precision.set_global_policy('mixed_float16')
 
 tf.random.set_seed(42)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--file', type=str, default='data/TEC14_Data.csv', help='Путь к файлу данных') #data/TEC22_Data.csv data/TEC14_Data.csv
-    parser.add_argument('--start', type=int, default=2000, help='Индекс начала тестовых данных')     #2700 #2000
+    parser.add_argument('--file', type=str, default='data/TEC22_Data.csv', help='Путь к файлу данных') #data/TEC22_Data.csv data/TEC14_Data.csv
+    parser.add_argument('--start', type=int, default=2700, help='Индекс начала тестовых данных')     #2700 #2000
     parser.add_argument('--forecast_window', type=int, default=14, help='окно прогноза')
-    parser.add_argument('--target_power_unit', type=str, nargs='+', default=['B1', 'B2'], help='Цель предсказания')
+    parser.add_argument('--target_power_unit', type=str, nargs='+', default=['B1', 'B2', 'B3', 'B4'], help='Цель предсказания')
     args = parser.parse_args()
 
     data_path = args.file
@@ -53,9 +70,7 @@ def main():
         results[calc_goal + '_Available_Nmax'] = tg_constraints[calc_goal + '_Available_Nmax']
         print(calc_goal, 'best_stat_model_name:', best_stat_model_name)
         results = {k: np.array(v).flatten() for k, v in results.items()}
-    df_report = pd.DataFrame(results)
-    df_report.to_excel('df_report.xlsx', index=False)
-
+        df_report = pd.DataFrame(results)
     goal_mapping = {
         "data/TEC22_Data.csv": ["B1", "B2", "B3", "B4", "TEC_N_Aver_pred"],
         "data/TEC14_Data.csv": ["B1", "B2", "TEC_N_Aver_pred"]
@@ -66,15 +81,16 @@ def main():
     tec_p = [e for e in elements if "TEC" in e][0]
     boiler_ps = [e for e in elements if e.startswith("B")]
 
-    final_report = reconcile_with_mip(
+    final_report = reconcile_with_l2(
         df_report,
         tec_col=tec_p,
         boiler_prefixes=boiler_ps
     )
+    plot_final_graph(final_report)
 
-    # Сохранение
     final_report.to_csv(reports_dir + 'final_tec_report_reconciled.csv', index=False, sep=';')
     print("Файл сохранен: final_tec_report_reconciled.csv")
+
 
 if __name__ == "__main__":
     main()
