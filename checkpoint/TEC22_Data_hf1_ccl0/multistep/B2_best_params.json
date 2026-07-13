@@ -1,0 +1,1 @@
+{"0": {"sequence_length": 1, "n_lstm": 136, "n_dense": 94, "lr": 0.0001393919584410019}, "1": {"sequence_length": 1, "n_lstm": 95, "n_dense": 66, "lr": 0.00043712661584255255}}
