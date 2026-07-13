@@ -21,7 +21,7 @@ tf.random.set_seed(42)
 
 
 def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, results, best_window_model_name, test_idx,
-                                     best_step_model, best_stat_model_name, calc_goal):
+                                     best_step_model, best_stat_model_name, calc_goal, hierarchical_features, cliping_and_customLoss):
 
     results_list = []
     metrics_list = []
@@ -39,7 +39,7 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, re
 
     data_with_lag, base_features, weights_train = prepare_meta_step_data(
         data, train_size, n_out, results, best_window_model_name, best_stat_model_name, best_step_model, test_idx,
-        calc_goal
+        calc_goal, hierarchical_features, cliping_and_customLoss
     )
 
     max_possible_window = 3
@@ -52,12 +52,13 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, re
         print(f"\n=== Step training {step} ===")
 
         x_train_scaled, x_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test, y_train_s_combined, y_test_s_combined, y_test_combined = prepare_meta_direct_data(
-            data, data_with_lag, step, base_features, train_size, calc_goal)
+            data, data_with_lag, step, base_features, train_size, calc_goal, cliping_and_customLoss, hierarchical_features)
 
         if os.path.exists(current_checkpoint):
             print(f"--- Step {step}: Checkpoint found. Loading... ---")
             saved_window = all_steps_params.get(step_key, {}).get('sequence_length', 1)
-            model = load_model(current_checkpoint, custom_objects={'custom_loss': custom_loss})
+            if hierarchical_features == 0: model = load_model(current_checkpoint, custom_objects={'custom_loss': custom_loss})
+            else: model = load_model(current_checkpoint)
             model.optimizer.learning_rate.assign(1e-4)
             current_epochs, patience = 50, 10
             final_sequence_length = saved_window
@@ -99,7 +100,8 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, re
                         Dense(n_dense, activation='relu'),
                         Dense(1, dtype='float32')
                     ])
-                    m.compile(loss=custom_loss, optimizer=Adam(learning_rate=lr))
+                    if hierarchical_features == 0: m.compile(loss=custom_loss, optimizer=Adam(learning_rate=lr))
+                    else: m.compile(loss="mae", optimizer=Adam(learning_rate=lr))
 
                     m.fit(
                         train_dataset_optuna,
@@ -143,7 +145,8 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, re
                 Dense(params['n_dense'], activation='relu'),
                 Dense(1, dtype='float32')
             ])
-            model.compile(loss=custom_loss, optimizer=Adam(learning_rate=params['lr']), metrics=['mse'])
+            if hierarchical_features==0: model.compile(loss=custom_loss, optimizer=Adam(learning_rate=params['lr']), metrics=['mse'])
+            else: model.compile(loss="mae", optimizer=Adam(learning_rate=params['lr']), metrics=['mse'])
 
             if i > 0:
                 prev_path = f"{checkpoint_base}{i - 1}.keras"
@@ -190,10 +193,11 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, re
         y_test_combined_trimmed = y_test_combined[max_possible_window - 1:]
         y_test_trimmed = y_test[max_possible_window - 1:]
 
-        yhat[yhat < y_test_combined_trimmed[:, 2][:, None]] = 0
-        n_max = y_test_combined_trimmed[:, 1][:, None]
-        yhat = np.where(yhat > n_max, n_max, yhat)
-        yhat = np.maximum(yhat, 0)
+        if cliping_and_customLoss == 0.0:
+            yhat[yhat < y_test_combined_trimmed[:, 2][:, None]] = 0
+            n_max = y_test_combined_trimmed[:, 1][:, None]
+            yhat = np.where(yhat > n_max, n_max, yhat)
+            yhat = np.maximum(yhat, 0)
 
         results_list.append(yhat)
         metrics_list.append([

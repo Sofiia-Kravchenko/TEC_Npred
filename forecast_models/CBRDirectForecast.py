@@ -9,7 +9,7 @@ from sklearn import metrics
 from utils import prepare_step_data, prepare_direct_data, optuna_cbr_search
 
 
-def train_cbr_direct_multistep(data, checkpoint_dir,calc_goal, n_out, train_size):
+def train_cbr_direct_multistep(data, checkpoint_dir,calc_goal, n_out, train_size, cliping_and_customLoss):
     results_list = []
     metrics_list = []
 
@@ -21,13 +21,13 @@ def train_cbr_direct_multistep(data, checkpoint_dir,calc_goal, n_out, train_size
     else:
         best_params_storage = {}
 
-    data_with_lag, base_features, weights_train = prepare_step_data(data, train_size, n_out)
+    data_with_lag, base_features, weights_train = prepare_step_data(data, train_size, n_out, cliping_and_customLoss)
 
     for i in range(0, n_out, 1):
         step = str(i + 1)
         print(f"\n=== Step training {step} ===")
 
-        x_train_scaled, x_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test, y_train_s_combined, y_test_s_combined, y_test_combined = prepare_direct_data(data, data_with_lag, step, base_features, train_size)
+        x_train_scaled, x_test_scaled, y_train_scaled, y_test_scaled, scaler_y, y_test, y_train_s_combined, y_test_s_combined, y_test_combined = prepare_direct_data(data, data_with_lag, step, base_features, train_size, cliping_and_customLoss)
 
         if step in best_params_storage:
             print(f"--- Step {step}: Using saved parameters: {best_params_storage[step]}")
@@ -56,10 +56,11 @@ def train_cbr_direct_multistep(data, checkpoint_dir,calc_goal, n_out, train_size
 
         yhat_s = model.predict(x_test_scaled).reshape(-1, 1)
         yhat = scaler_y.inverse_transform(yhat_s)
-        yhat[yhat < y_test_combined[:, 2][:, None]] = 0
-        n_max = y_test_combined[:, 1][:, None]
-        yhat = np.where(yhat > n_max, n_max, yhat)
-        yhat = np.maximum(yhat, 0)
+        if cliping_and_customLoss == 0.0:
+            yhat[yhat < y_test_combined[:, 2][:, None]] = 0
+            n_max = y_test_combined[:, 1][:, None]
+            yhat = np.where(yhat > n_max, n_max, yhat)
+            yhat = np.maximum(yhat, 0)
 
         MAE_test = metrics.mean_absolute_error(y_test, yhat)
         MSE_test = metrics.mean_squared_error(y_test, yhat)

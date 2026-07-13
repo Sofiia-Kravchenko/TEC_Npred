@@ -21,13 +21,13 @@ from tensorflow.keras.callbacks import ModelCheckpoint
 
 tf.random.set_seed(42)
 
-def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, calc_goal, results, test_idx, best_window_model_name, best_stat_model_name, best_step_model, reports_dir):
+def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, calc_goal, results, test_idx, best_window_model_name, best_stat_model_name, best_step_model, reports_dir, hierarchical_features, cliping_and_customLoss):
     if calc_goal == 'TEC':
-        x_train_s, x_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, datas, test_idx,  y_train_s_combined, y_test_s_combined, y_test_combined = prepare_stat_data(data_path, test_start_index=test_start_index)
-        xw_train_s, xw_test_s, yw_train_s, yw_test_s, yw_test, scaler_yw, datasw, testw_idx,  yw_train_s_combined, yw_test_s_combined, yw_test_combined = prepare_window_data(data_path, test_start_index=test_start_index)
+        x_train_s, x_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, datas, test_idx,  y_train_s_combined, y_test_s_combined, y_test_combined = prepare_stat_data(data_path, test_start_index, cliping_and_customLoss)
+        xw_train_s, xw_test_s, yw_train_s, yw_test_s, yw_test, scaler_yw, datasw, testw_idx,  yw_train_s_combined, yw_test_s_combined, yw_test_combined = prepare_window_data(data_path, test_start_index, cliping_and_customLoss)
     else:
-        x_train_s, x_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, datas, test_idx,  y_train_s_combined, y_test_s_combined, y_test_combined = prepare_meta_data(results, data_path, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model)
-        xw_train_s, xw_test_s, yw_train_s, yw_test_s, yw_test, scaler_yw, datasw, testw_idx,  yw_train_s_combined, yw_test_s_combined, yw_test_combined = prepare_meta_window_data(results, data_path, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model)
+        x_train_s, x_test_s, y_train_s, y_test_s, y_train, y_test, scaler_y, datas, test_idx,  y_train_s_combined, y_test_s_combined, y_test_combined = prepare_meta_data(results, data_path, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model, hierarchical_features, cliping_and_customLoss)
+        xw_train_s, xw_test_s, yw_train_s, yw_test_s, yw_test, scaler_yw, datasw, testw_idx,  yw_train_s_combined, yw_test_s_combined, yw_test_combined = prepare_meta_window_data(results, data_path, test_idx, test_start_index, calc_goal, best_window_model_name, best_stat_model_name, best_step_model, hierarchical_features, cliping_and_customLoss)
     results = {}
     constraints = {calc_goal + '_Available_Nmin': scaler_y.inverse_transform(y_test_s_combined[:, 2][:, None]),
                    calc_goal + '_Available_Nmax': scaler_y.inverse_transform(y_test_s_combined[:, 1][:, None])}
@@ -92,9 +92,11 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
     model_lr = get_linear()
     model_lr.fit(x_train_s, y_train)
     yhat = model_lr.predict(x_test_s)
-    yhat[yhat < y_test_combined[:, 2][:, None]] = 0
-    n_max = y_test_combined[:, 1][:, None]
-    yhat = np.where(yhat > n_max, n_max, yhat)
+    if cliping_and_customLoss==0:
+        yhat[yhat < y_test_combined[:, 2][:, None]] = 0
+        n_max = y_test_combined[:, 1][:, None]
+        yhat = np.where(yhat > n_max, n_max, yhat)
+        yhat = np.maximum(yhat, 0)
     results['Linear'] = np.maximum(yhat, 0)
 
     # ---  poly Regression ---
@@ -105,11 +107,13 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
 
     model_poly = get_linear()
     model_poly.fit(x_train_poly, y_train)
-    yhat = model_poly.predict(x_test_poly)
-    yhat[yhat < y_test_combined[:, 2][:, None]] = 0
-    n_max = y_test_combined[:, 1][:, None]
-    yhat = np.where(yhat > n_max, n_max, yhat)
-    results['Polynomial (d=2)'] = np.maximum(yhat, 0)
+    if cliping_and_customLoss==0:
+        yhat = model_poly.predict(x_test_poly)
+        yhat[yhat < y_test_combined[:, 2][:, None]] = 0
+        n_max = y_test_combined[:, 1][:, None]
+        yhat = np.where(yhat > n_max, n_max, yhat)
+        yhat = np.maximum(yhat, 0)
+    results['Polynomial (d=2)'] = yhat
 
     # ---  Gradient Boosting ---
     print('CBR_Stat_Model')
@@ -117,14 +121,15 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
     model_cb.fit(x_train_s, y_train_s, eval_set=(x_test_s, y_test_s), early_stopping_rounds=250, use_best_model=True)
     yhat_s = model_cb.predict(x_test_s).reshape(-1, 1)
     yhat = scaler_y.inverse_transform(yhat_s)
-    yhat[yhat < y_test_combined[:, 2][:, None]] = 0
-    n_max = y_test_combined[:, 1][:, None]
-    yhat = np.where(yhat > n_max, n_max, yhat)
-    results['Boosting'] = np.maximum(yhat, 0)
+    if cliping_and_customLoss==0:
+        yhat[yhat < y_test_combined[:, 2][:, None]] = 0
+        n_max = y_test_combined[:, 1][:, None]
+        yhat = np.where(yhat > n_max, n_max, yhat)
+        yhat = np.maximum(yhat, 0)
+    results['Boosting'] = yhat
 
     # ---  MLP ---
     print('MLP_Stat_Model')
-
     checkpoint_filepath = checkpoint_dir + calc_goal + '_MLP.keras'
     params_filepath = checkpoint_dir + calc_goal + '_MLP_params.json'
     model_checkpoint_callback = ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=False,
@@ -144,10 +149,12 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
 
     yhat_s = model_mlp.predict(x_test_s)
     yhat = scaler_y.inverse_transform(yhat_s)
-    yhat[yhat < y_test_combined[:, 2][:, None]] = 0
-    n_max = y_test_combined[:, 1][:, None]
-    yhat = np.where(yhat > n_max, n_max, yhat)
-    results['MLP'] = np.maximum(yhat, 0)
+    if cliping_and_customLoss==0:
+        yhat[yhat < y_test_combined[:, 2][:, None]] = 0
+        n_max = y_test_combined[:, 1][:, None]
+        yhat = np.where(yhat > n_max, n_max, yhat)
+        yhat = np.maximum(yhat, 0)
+    results['MLP'] = yhat
 
     # ---  Random Forest Regression---
     print('RFR_Stat_Model')
@@ -155,10 +162,12 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
     model_rfr.fit(x_train_s, y_train_s)
     yhat_s = model_rfr.predict(x_test_s).reshape(-1, 1)
     yhat = scaler_y.inverse_transform(yhat_s)
-    yhat[yhat < y_test_combined[:, 2][:, None]] = 0
-    n_max = y_test_combined[:, 1][:, None]
-    yhat = np.where(yhat > n_max, n_max, yhat)
-    results['RandomForest'] = np.maximum(yhat, 0)
+    if cliping_and_customLoss==0:
+        yhat[yhat < y_test_combined[:, 2][:, None]] = 0
+        n_max = y_test_combined[:, 1][:, None]
+        yhat = np.where(yhat > n_max, n_max, yhat)
+        yhat = np.maximum(yhat, 0)
+    results['RandomForest'] = yhat
 
     # ---  Gradient booster with window ---
     print('CBR_with_window_Stat_Model')
@@ -166,18 +175,17 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
     model_cbw.fit(xw_train_s, yw_train_s, eval_set=(xw_test_s, yw_test_s), early_stopping_rounds=250, use_best_model=True)
     yhat_s = model_cbw.predict(xw_test_s).reshape(-1, 1)
     yhat = scaler_y.inverse_transform(yhat_s)
-
-    yhat[yhat < yw_test_combined[:, 2][:, None]] = 0
-    n_max = yw_test_combined[:, 1][:, None]
-    yhat = np.where(yhat > n_max, n_max, yhat)
-    results['Boosting_custom_with_window'] = np.maximum(yhat, 0)
+    if cliping_and_customLoss==0:
+        yhat[yhat < yw_test_combined[:, 2][:, None]] = 0
+        n_max = yw_test_combined[:, 1][:, None]
+        yhat = np.where(yhat > n_max, n_max, yhat)
+        yhat = np.maximum(yhat, 0)
+    results['Boosting_custom_with_window'] = yhat
 
     # ---  LSTM with window ---
     print('LSTM_with_window_Stat_Model Evaluation')
-
     xw_train_lstm = xw_train_s.reshape((xw_train_s.shape[0], 1, xw_train_s.shape[1]))
     xw_test_lstm = xw_test_s.reshape((xw_test_s.shape[0], 1, xw_test_s.shape[1]))
-
     for loss_type in ['custom', 'mae']:
         print(f"\n--- Processing LSTM with window ({loss_type.upper()} loss) ---")
 
@@ -235,11 +243,12 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
     yhat_s = model_rfr.predict(xw_test_s).reshape(-1, 1)
     yhat = scaler_y.inverse_transform(yhat_s)
     results['RandomForest_mae_with_window'] = yhat
-
-    yhat[yhat < yw_test_combined[:, 2][:, None]] = 0
-    n_max = yw_test_combined[:, 1][:, None]
-    yhat = np.where(yhat > n_max, n_max, yhat)
-    results['RandomForest_custom_with_window'] = np.maximum(yhat, 0)
+    if cliping_and_customLoss==0:
+        yhat[yhat < yw_test_combined[:, 2][:, None]] = 0
+        n_max = yw_test_combined[:, 1][:, None]
+        yhat = np.where(yhat > n_max, n_max, yhat)
+        yhat = np.maximum(yhat, 0)
+    results['RandomForest_custom_with_window'] = yhat
 
     best_window_model_name, best_stat_model_name  = print_stat_results(reports_dir, results, y_test, calc_goal)
 
@@ -262,20 +271,20 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
     # ---  LSTM direct forecast---
     print('LSTM_direct_Stat_Model')
     if calc_goal == 'TEC':
-        lstm_multi_results, lstm_multi_metrics = train_lstm_direct_multistep(data_path, checkpoint_dir, n_out, test_start_index, calc_goal)
+        lstm_multi_results, lstm_multi_metrics = train_lstm_direct_multistep(data_path, checkpoint_dir, n_out, test_start_index, calc_goal, cliping_and_customLoss)
     else :
         lstm_multi_results, lstm_multi_metrics = train_lstm_meta_direct_multistep(data_path, checkpoint_dir, n_out, test_start_index, results,
-                                     best_window_model_name, test_idx, best_step_model, best_stat_model_name, calc_goal)
+                                     best_window_model_name, test_idx, best_step_model, best_stat_model_name, calc_goal, hierarchical_features ,cliping_and_customLoss)
     lstm_multi_results = np.array(lstm_multi_results).reshape(-1, 14)
     lstm_multi_metrics = np.array(lstm_multi_metrics).reshape(-1, 4)
     # --- Boosting with window direct forecast---
     print('CBR_direct_Stat_Model')
     if calc_goal == 'TEC':
-        cbr_multi_results, cbr_multi_metrics = train_cbr_direct_multistep(data_path, checkpoint_dir, calc_goal, n_out, test_start_index)
+        cbr_multi_results, cbr_multi_metrics = train_cbr_direct_multistep(data_path, checkpoint_dir, calc_goal, n_out, test_start_index, cliping_and_customLoss)
     else:
         cbr_multi_results, cbr_multi_metrics = train_cbr_meta_direct_multistep(data_path, checkpoint_dir, n_out,
                                                                          test_start_index, results,
-                                     best_window_model_name, test_idx, best_step_model, best_stat_model_name, calc_goal)
+                                     best_window_model_name, test_idx, best_step_model, best_stat_model_name, calc_goal, hierarchical_features, cliping_and_customLoss)
     cbr_multi_results = np.array(cbr_multi_results).reshape(-1, 14)
     cbr_multi_metrics = np.array(cbr_multi_metrics).reshape(-1, 4)
 
