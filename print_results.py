@@ -6,10 +6,10 @@ import seaborn as sns
 from sklearn import metrics
 
 import matplotlib
-matplotlib.use('module://backend_interagg')
+#matplotlib.use('module://backend_interagg')
 import matplotlib.pyplot as plt
-plt.rcParams['text.antialiased'] = True
-plt.rcParams['lines.antialiased'] = True
+#plt.rcParams['text.antialiased'] = True
+#plt.rcParams['lines.antialiased'] = True
 from matplotlib import pyplot as plt, ticker
 
 def print_stat_results(reports_dir, results, y_test, calc_goal):
