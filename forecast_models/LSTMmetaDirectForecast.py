@@ -42,7 +42,7 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, re
         calc_goal, hierarchical_features, cliping_and_customLoss
     )
 
-    max_possible_window = 3
+    max_possible_window = 1
     current_batch_size = 4096
 
     for i in range(n_out):
@@ -70,7 +70,7 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, re
                 print(f"--- Step {step}: Tuning hyperparameters with Optuna... ---")
 
                 def objective(trial):
-                    seq_len = trial.suggest_categorical('sequence_length', [1, 2, 3])
+                    seq_len = trial.suggest_categorical('sequence_length', [1])
 
                     n_lstm = trial.suggest_int('n_lstm', 50, 200)
                     n_dense = trial.suggest_int('n_dense', 20, 100)
@@ -131,7 +131,7 @@ def train_lstm_meta_direct_multistep(data, checkpoint_dir, n_out, train_size, re
                     return mae
 
                 study = optuna.create_study(direction='minimize')
-                study.optimize(objective, n_trials=100)
+                study.optimize(objective, n_trials=50)
                 all_steps_params[step_key] = study.best_params
                 with open(params_path, 'w') as f:
                     json.dump(all_steps_params, f)

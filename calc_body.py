@@ -37,7 +37,11 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
     x_train_lstm = x_train_s.reshape((x_train_s.shape[0], 1, x_train_s.shape[1]))
     x_test_lstm = x_test_s.reshape((x_test_s.shape[0], 1, x_test_s.shape[1]))
 
-    for loss_type in ['custom', 'mae']:
+    if cliping_and_customLoss == 0: loss_types = ['custom']
+    elif cliping_and_customLoss == 1: loss_types = ['mae']
+    else: loss_types = ['custom', 'mae']
+
+    for loss_type in loss_types:
         print(f"\n--- Processing LSTM with {loss_type.upper()} loss ---")
 
         model_lstm, early_stop_callback, current_epochs, checkpoint_filepath = get_lstm(
@@ -45,10 +49,7 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
             scaler_y, y_train_s_combined, y_test_s_combined, checkpoint_dir, calc_goal, loss_type=loss_type
         )
 
-        model_checkpoint_callback = ModelCheckpoint(
-            filepath=checkpoint_filepath, save_weights_only=False,
-            monitor='val_loss', mode='min', save_best_only=True, verbose=0
-        )
+        model_checkpoint_callback = ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=False, monitor='val_loss', mode='min', save_best_only=True, verbose=0)
 
         model_lstm.fit(
             x_train_lstm, y_train_s_combined,
@@ -180,13 +181,18 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
         n_max = yw_test_combined[:, 1][:, None]
         yhat = np.where(yhat > n_max, n_max, yhat)
         yhat = np.maximum(yhat, 0)
-    results['Boosting_custom_with_window'] = yhat
+    results['Boosting_with_window'] = yhat
 
     # ---  LSTM with window ---
     print('LSTM_with_window_Stat_Model Evaluation')
     xw_train_lstm = xw_train_s.reshape((xw_train_s.shape[0], 1, xw_train_s.shape[1]))
     xw_test_lstm = xw_test_s.reshape((xw_test_s.shape[0], 1, xw_test_s.shape[1]))
-    for loss_type in ['custom', 'mae']:
+
+    if cliping_and_customLoss == 0: loss_types = ['custom']
+    elif cliping_and_customLoss == 1: loss_types = ['mae']
+    else: loss_types = ['custom', 'mae']
+
+    for loss_type in loss_types:
         print(f"\n--- Processing LSTM with window ({loss_type.upper()} loss) ---")
 
         model_lstmrw, early_stop_callback, current_epochs, checkpoint_filepath = get_lstm(
@@ -242,31 +248,32 @@ def calc_power_generation(data_path, test_start_index, checkpoint_dir, n_out, ca
     model_rfr.fit(xw_train_s, yw_train_s)
     yhat_s = model_rfr.predict(xw_test_s).reshape(-1, 1)
     yhat = scaler_y.inverse_transform(yhat_s)
-    results['RandomForest_mae_with_window'] = yhat
+
     if cliping_and_customLoss==0:
         yhat[yhat < yw_test_combined[:, 2][:, None]] = 0
         n_max = yw_test_combined[:, 1][:, None]
         yhat = np.where(yhat > n_max, n_max, yhat)
         yhat = np.maximum(yhat, 0)
-    results['RandomForest_custom_with_window'] = yhat
+
+    results['RandomForest_with_window'] = yhat
 
     best_window_model_name, best_stat_model_name  = print_stat_results(reports_dir, results, y_test, calc_goal)
 
-    plot_single_model_violations(
-        y_true_real=y_test,
-        y_pred=results[best_stat_model_name],
-        n_max=y_test_combined[:, 1][:, None],
-        n_min=y_test_combined[:, 2][:, None],
-        model_name=best_stat_model_name,
-    )
-
-    plot_single_model_violations(
-        y_true_real=yw_test,
-        y_pred=results[best_window_model_name],
-        n_max=yw_test_combined[:, 1][:, None],
-        n_min=yw_test_combined[:, 2][:, None],
-        model_name=best_window_model_name,
-    )
+    # plot_single_model_violations(
+    #     y_true_real=y_test,
+    #     y_pred=results[best_stat_model_name],
+    #     n_max=y_test_combined[:, 1][:, None],
+    #     n_min=y_test_combined[:, 2][:, None],
+    #     model_name=best_stat_model_name,
+    # )
+    #
+    # plot_single_model_violations(
+    #     y_true_real=yw_test,
+    #     y_pred=results[best_window_model_name],
+    #     n_max=yw_test_combined[:, 1][:, None],
+    #     n_min=yw_test_combined[:, 2][:, None],
+    #     model_name=best_window_model_name,
+    # )
 
     # ---  LSTM direct forecast---
     print('LSTM_direct_Stat_Model')

@@ -2,17 +2,17 @@ import os
 import sys
 import ctypes
 
-sys.stderr = open(os.devnull, 'w')
-
-try:
-    libc = ctypes.CDLL(None)
-    devnull_fd = os.open(os.devnull, os.O_WRONLY)
-    libc.dup2(devnull_fd, 2)
-except Exception: pass
-
-os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=-1'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-sys.stderr = open(os.devnull, 'w')
+# sys.stderr = open(os.devnull, 'w')
+#
+# try:
+#     libc = ctypes.CDLL(None)
+#     devnull_fd = os.open(os.devnull, os.O_WRONLY)
+#     libc.dup2(devnull_fd, 2)
+# except Exception: pass
+#
+# os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=-1'
+# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+# sys.stderr = open(os.devnull, 'w')
 
 import warnings
 import numpy as np
@@ -34,7 +34,7 @@ def main():
     parser.add_argument('--forecast_window', type=int, default=14, help='окно прогноза')
     parser.add_argument('--target_power_unit', type=str, nargs='+', default=['B1', 'B2', 'B3', 'B4'], help='Цель предсказания')
     parser.add_argument('--hierarchical_features', type=int, default=1, help='Иерархические признаки (0-да, 1-нет)')
-    parser.add_argument('--cliping_and_customLoss', type=int, default=0, help='Кастомная обработка данных (0-да, 1-нет)')
+    parser.add_argument('--cliping_and_customLoss', type=int, default=1, help='Кастомная обработка данных (0-да, 1-нет)')
     args = parser.parse_args()
 
     data_path = args.file
