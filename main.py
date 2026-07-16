@@ -29,10 +29,10 @@ tf.random.set_seed(42)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--file', type=str, default='data/TEC22_Data.csv', help='Путь к файлу данных') #data/TEC22_Data.csv data/TEC14_Data.csv
-    parser.add_argument('--start', type=int, default=2700, help='Индекс начала тестовых данных')     #2700 #2000
+    parser.add_argument('--file', type=str, default='data/TEC14_Data.csv', help='Путь к файлу данных') #data/TEC22_Data.csv data/TEC14_Data.csv
+    parser.add_argument('--start', type=int, default=2000, help='Индекс начала тестовых данных')     #2700 #2000
     parser.add_argument('--forecast_window', type=int, default=14, help='окно прогноза')
-    parser.add_argument('--target_power_unit', type=str, nargs='+', default=['B1', 'B2', 'B3', 'B4'], help='Цель предсказания')
+    parser.add_argument('--target_power_unit', type=str, nargs='+', default=['B1', 'B2'], help='Цель предсказания')
     parser.add_argument('--hierarchical_features', type=int, default=1, help='Иерархические признаки (0-да, 1-нет)')
     parser.add_argument('--cliping_and_customLoss', type=int, default=1, help='Кастомная обработка данных (0-да, 1-нет)')
     args = parser.parse_args()
