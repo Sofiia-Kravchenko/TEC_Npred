@@ -141,10 +141,15 @@ def prepare_stat_data(filepath, test_start_index, cliping_and_customLoss):
 
         data.dropna(inplace=True)
 
-        x = data.loc[:, ['T', 'Month_sin', 'Month_cos',
+        if cliping_and_customLoss == 0:
+            x = data.loc[:, ['T', 'Month_sin', 'Month_cos',
                          'B1_Available_Nmax', 'B2_Available_Nmax',
                          'B1_Available_Nmin', 'B2_Available_Nmin',
                          'TEC_Available_Nmax','TEC_Available_Nmin']].values
+        else:
+            x = data.loc[:,
+                ['T', 'Month_sin', 'Month_cos', 'B1_inWork', 'B2_inWork', 'B1_GT11_inWork', 'B1_GT12_inWork', 'B2_GT21_inWork',
+                 'B2_GT22_inWork']].values
         y = data.loc[:, ['TEC_N_Aver']].values
         y_true_combined = data.loc[:, ['TEC_N_Aver', 'TEC_Available_Nmax',
                                        'TEC_Available_Nmin']].values
@@ -277,8 +282,7 @@ def prepare_window_data(filepath, test_start_index, cliping_and_customLoss):
         else:
             x = data.loc[:,['T', 'Month_sin', 'Month_cos', 'B1_inWork', 'B2_inWork', 'B3_inWork', 'B4_inWork', 'B4_GT41_inWork', 'B4_GT42_inWork',
                             'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev', 'B1_inWork_Prev', 'B2_inWork_Prev', 'B3_inWork_Prev', 'B4_inWork_Prev', 'B4_GT41_inWork_Prev', 'B4_GT42_inWork_Prev',
-                            ]]
-
+                            ]].values
 
         y = data.loc[:, ['TEC_N_Aver']].values
 
@@ -339,9 +343,17 @@ def prepare_window_data(filepath, test_start_index, cliping_and_customLoss):
         data['B2_Available_Nmin_Prev'] = data['B2_Available_Nmin'].shift(1)
         data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
 
+        data['B1_inWork_Prev'] = data['B1_inWork'].shift(1)
+        data['B2_inWork_Prev'] = data['B2_inWork'].shift(1)
+        data['B1_GT11_inWork_Prev'] = data['B1_GT11_inWork'].shift(1)
+        data['B1_GT12_inWork_Prev'] = data['B1_GT12_inWork'].shift(1)
+        data['B2_GT21_inWork_Prev'] = data['B2_GT21_inWork'].shift(1)
+        data['B2_GT22_inWork_Prev'] = data['B2_GT22_inWork'].shift(1)
+
         data.dropna(inplace=True)
 
-        x = data.loc[:, ['T', 'Month_sin', 'Month_cos',
+        if cliping_and_customLoss == 0:
+            x = data.loc[:, ['T', 'Month_sin', 'Month_cos',
                          'B1_Available_Nmax', 'B2_Available_Nmax',
                          'B1_Available_Nmin', 'B2_Available_Nmin',
                          'TEC_Available_Nmax', 'TEC_Available_Nmin',
@@ -351,6 +363,18 @@ def prepare_window_data(filepath, test_start_index, cliping_and_customLoss):
                          'B1_Available_Nmin_Prev', 'B2_Available_Nmin_Prev',
                          'TEC_Available_Nmax_Prev', 'TEC_Available_Nmin_Prev',
                          'TEC_N_Aver_Prev']].values
+        else:
+            x = data.loc[:, ['T', 'Month_sin', 'Month_cos',
+                         'B1_inWork', 'B2_inWork',
+                         'B1_GT11_inWork', 'B1_GT12_inWork',
+                         'B2_GT21_inWork', 'B2_GT22_inWork',
+                         'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev',
+                         'B1_N_Aver_Prev', 'B2_inWork_Prev',
+                         'B1_inWork_Prev', 'B2_Available_Nmax_Prev',
+                         'B1_GT11_inWork_Prev', 'B1_GT12_inWork_Prev',
+                         'B2_GT21_inWork_Prev', 'B2_GT22_inWork_Prev',
+                         'TEC_N_Aver_Prev']].values
+
         y = data.loc[:, ['TEC_N_Aver']].values
 
         y_true_combined = data.loc[:, ['TEC_N_Aver', 'TEC_Available_Nmax',
@@ -456,6 +480,7 @@ def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, 
         data['B2_GT22_inWork'] = np.where(data['B2_GT22_N_Aver'] >= 30, 1, 0)
         data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 45, 1, 0)
         data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 45, 1, 0)
+        data['TEC_inWork'] = data['B1_GT11_inWork'] + data['B1_GT12_inWork'] + data['B2_GT21_inWork'] + data['B2_GT22_inWork']
 
         data.loc[data['B1_GT11_N_Aver'] < 30, 'B1_GT11_N_Aver'] = 0
         data.loc[data['B1_GT12_N_Aver'] < 30, 'B1_GT12_N_Aver'] = 0
@@ -507,6 +532,12 @@ def prepare_meta_data(results, filepath, test_idx, test_start_index, calc_goal, 
             if filepath == 'data/TEC22_Data.csv' and calc_goal=='B4':
                 features.append('B4_GT41_inWork')
                 features.append('B4_GT42_inWork')
+            if filepath == 'data/TEC14_Data.csv' and calc_goal == 'B1':
+                features.append('B1_GT11_inWork')
+                features.append('B1_GT12_inWork')
+            if filepath == 'data/TEC14_Data.csv' and calc_goal == 'B2':
+                features.append('B2_GT21_inWork')
+                features.append('B2_GT22_inWork')
 
     x = data.loc[:, features].values
     y = data.loc[:, [calc_goal+'_N_Aver']].values
@@ -656,6 +687,7 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data['B2_GT22_inWork'] = np.where(data['B2_GT22_N_Aver'] >= 30, 1, 0)
         data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 45, 1, 0)
         data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 45, 1, 0)
+        data['TEC_inWork'] = data['B1_GT11_inWork'] + data['B1_GT12_inWork'] + data['B2_GT21_inWork'] + data['B2_GT22_inWork']
 
         data.loc[data['B1_GT11_N_Aver'] < 30, 'B1_GT11_N_Aver'] = 0
         data.loc[data['B1_GT12_N_Aver'] < 30, 'B1_GT12_N_Aver'] = 0
@@ -711,6 +743,13 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
         data['TEC_Available_Nmax_Prev'] = data['TEC_Available_Nmax'].shift(1)
         data['TEC_Available_Nmin_Prev'] = data['TEC_Available_Nmin'].shift(1)
         data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
+        data['B1_inWork_Prev'] = data['B1_inWork'].shift(1)
+        data['B2_inWork_Prev'] = data['B2_inWork'].shift(1)
+        data['B2_GT21_inWork_Prev'] = data['B2_GT21_inWork'].shift(1)
+        data['B2_GT22_inWork_Prev'] = data['B2_GT22_inWork'].shift(1)
+        data['B1_GT11_inWork_Prev'] = data['B1_GT11_inWork'].shift(1)
+        data['B1_GT12_inWork_Prev'] = data['B1_GT12_inWork'].shift(1)
+        data['TEC_inWork_Prev'] = data['TEC_inWork'].shift(1)
 
     data.dropna(inplace=True)
 
@@ -732,6 +771,11 @@ def prepare_meta_window_data(results, filepath, test_idx, test_start_index, calc
                 features.append('B4_GT42_inWork')
                 features.append('B4_GT41_inWork_Prev')
                 features.append('B4_GT42_inWork_Prev')
+            if filepath == 'data/TEC14_Data.csv' and calc_goal=='B1':
+                features.append('B1_GT11_inWork')
+                features.append('B1_GT12_inWork')
+                features.append('B2_GT21_inWork_Prev')
+                features.append('B2_GT22_inWork_Prev')
     x = data.loc[:, features].values
     y = data.loc[:, [calc_goal+'_N_Aver']].values
 
@@ -873,6 +917,7 @@ def prepare_step_data(filepath, test_start_index, n_out, cliping_and_customLoss)
         data['B2_GT22_inWork'] = np.where(data['B2_GT22_N_Aver'] >= 30, 1, 0)
         data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 45, 1, 0)
         data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 45, 1, 0)
+        data['TEC_inWork'] = data['B1_GT11_inWork'] + data['B1_GT12_inWork'] + data['B2_GT21_inWork'] + data['B2_GT22_inWork']
 
         data.loc[data['B1_GT11_N_Aver'] < 30, 'B1_GT11_N_Aver'] = 0
         data.loc[data['B1_GT12_N_Aver'] < 30, 'B1_GT12_N_Aver'] = 0
@@ -913,6 +958,11 @@ def prepare_step_data(filepath, test_start_index, n_out, cliping_and_customLoss)
         data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
         data['B1_inWork_Prev'] = data['B1_inWork'].shift(1)
         data['B2_inWork_Prev'] = data['B2_inWork'].shift(1)
+        data['B2_GT21_inWork_Prev'] = data['B2_GT21_inWork'].shift(1)
+        data['B2_GT22_inWork_Prev'] = data['B2_GT22_inWork'].shift(1)
+        data['B1_GT11_inWork_Prev'] = data['B1_GT11_inWork'].shift(1)
+        data['B1_GT12_inWork_Prev'] = data['B1_GT12_inWork'].shift(1)
+        data['TEC_inWork_Prev'] = data['TEC_inWork'].shift(1)
 
         data['sample_weight'] = 1.0
 
@@ -979,6 +1029,7 @@ def prepare_step_data(filepath, test_start_index, n_out, cliping_and_customLoss)
             cols.append(df[['TEC_N_Aver']].shift(-i))
             cols.append(df[['B1_inWork']].shift(-i))
             cols.append(df[['B2_inWork']].shift(-i))
+            cols.append(df[['TEC_inWork']].shift(-i))
             cols.append(df[['B1_GT11_inWork']].shift(-i))
             cols.append(df[['B1_GT12_inWork']].shift(-i))
             cols.append(df[['B2_GT21_inWork']].shift(-i))
@@ -990,7 +1041,7 @@ def prepare_step_data(filepath, test_start_index, n_out, cliping_and_customLoss)
             cols.append(df[['B2_Available_Nmax']].shift(-i))
             cols.append(df[['TEC_Available_Nmax']].shift(-i))
             names += [f'T_lag{i}', f'Month_sin_lag{i}', f'Month_cos_lag{i}',f'Year_lag{i}',f'TEC_N_Aver_lag{i}',
-                      f'B1_inWork_lag{i}', f'B2_inWork_lag{i}',
+                      f'B1_inWork_lag{i}', f'B2_inWork_lag{i}',f'TEC_inWork_lag{i}',
                       f'B1_GT11_inWork_lag{i}', f'B1_GT12_inWork_lag{i}', f'B2_GT21_inWork_lag{i}', f'B2_GT22_inWork_lag{i}',
                       f'B1_Available_Nmin_lag{i}', f'B2_Available_Nmin_lag{i}', f'TEC_Available_Nmin_lag{i}',
                       f'B1_Available_Nmax_lag{i}', f'B2_Available_Nmax_lag{i}', f'TEC_Available_Nmax_lag{i}',
@@ -1128,6 +1179,7 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
         data['B2_GT22_inWork'] = np.where(data['B2_GT22_N_Aver'] >= 30, 1, 0)
         data['B1_inWork'] = np.where(data['B1_N_Aver'] >= 45, 1, 0)
         data['B2_inWork'] = np.where(data['B2_N_Aver'] >= 45, 1, 0)
+        data['TEC_inWork'] = data['B1_GT11_inWork'] + data['B1_GT12_inWork'] + data['B2_GT21_inWork'] + data['B2_GT22_inWork']
 
         data.loc[data['B1_GT11_N_Aver'] < 30, 'B1_GT11_N_Aver'] = 0
         data.loc[data['B1_GT12_N_Aver'] < 30, 'B1_GT12_N_Aver'] = 0
@@ -1187,6 +1239,11 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
         data['TEC_N_Aver_Prev'] = data['TEC_N_Aver'].shift(1)
         data['B1_inWork_Prev'] = data['B1_inWork'].shift(1)
         data['B2_inWork_Prev'] = data['B2_inWork'].shift(1)
+        data['B2_GT21_inWork_Prev'] = data['B2_GT21_inWork'].shift(1)
+        data['B2_GT22_inWork_Prev'] = data['B2_GT22_inWork'].shift(1)
+        data['B1_GT11_inWork_Prev'] = data['B1_GT11_inWork'].shift(1)
+        data['B1_GT12_inWork_Prev'] = data['B1_GT12_inWork'].shift(1)
+        data['TEC_inWork_Prev'] = data['TEC_inWork'].shift(1)
 
     if hierarchical_features == 0: base_features = ['T', 'Month_sin', 'Month_cos', 'TEC_N_Aver_pred',
      'T_Prev', 'Month_sin_Prev', 'Month_cos_Prev','TEC_N_Aver_Prev']
@@ -1208,6 +1265,16 @@ def prepare_meta_step_data(filepath, test_start_index, n_out, results,best_windo
                 base_features.append('B4_GT42_inWork')
                 base_features.append('B4_GT41_inWork_Prev')
                 base_features.append('B4_GT42_inWork_Prev')
+            if filepath == 'data/TEC14_Data.csv' and calc_goal == 'B1':
+                base_features.append('B1_GT11_inWork')
+                base_features.append('B1_GT12_inWork')
+                base_features.append('B1_GT11_inWork_Prev')
+                base_features.append('B1_GT12_inWork_Prev')
+            if filepath == 'data/TEC14_Data.csv' and calc_goal == 'B2':
+                base_features.append('B2_GT21_inWork')
+                base_features.append('B2_GT22_inWork')
+                base_features.append('B2_GT21_inWork_Prev')
+                base_features.append('B2_GT22_inWork_Prev')
 
     df = DataFrame(data)
 
@@ -1295,13 +1362,20 @@ def prepare_direct_data(filepath, data_with_lag, step, base_features, train_size
         if cliping_and_customLoss == 0.0:
             current_features.append(f'{prefix}_Available_Nmax_lag{step}')
             current_features.append(f'{prefix}_Available_Nmin_lag{step}')
-        else:
+        elif filepath == 'data/TEC22_Data.csv':
             current_features.append(f'B1_inWork_lag{step}')
             current_features.append(f'B2_inWork_lag{step}')
             current_features.append(f'B3_inWork_lag{step}')
             current_features.append(f'B4_inWork_lag{step}')
             current_features.append(f'B4_GT41_inWork_lag{step}')
             current_features.append(f'B4_GT42_inWork_lag{step}')
+        elif filepath == 'data/TEC14_Data.csv':
+            current_features.append(f'B1_inWork_lag{step}')
+            current_features.append(f'B2_inWork_lag{step}')
+            current_features.append(f'B2_GT21_inWork_lag{step}')
+            current_features.append(f'B2_GT22_inWork_lag{step}')
+            current_features.append(f'B1_GT11_inWork_lag{step}')
+            current_features.append(f'B1_GT12_inWork_lag{step}')
 
     x = data_with_lag[current_features].values
     y = data_with_lag.loc[:, [f'TEC_N_Aver_lag{step}']].values
